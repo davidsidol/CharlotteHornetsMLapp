@@ -26,4 +26,4 @@ if __name__ == "__main__":
     print("   Press Ctrl+C to stop")
     print("  ==========================================")
     print("")
-    serve(app, host=host, port=port, threads=8)
+    serve(app, host=host, port=port, threads=32)

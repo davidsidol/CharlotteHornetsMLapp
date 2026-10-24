@@ -54,6 +54,22 @@ header{flex:0 0 auto;position:relative;z-index:20;
 .btn-refresh:hover{opacity:.85;transform:translateY(-1px)}
 .btn-refresh.spin{opacity:.5;pointer-events:none}
 
+/* ── SEASON SWITCHER ── */
+.seasons{flex:0 0 auto;display:flex;align-items:center;gap:10px;padding:10px 32px;
+  border-bottom:1px solid var(--bdr);background:rgba(7,7,16,.85);
+  position:relative;z-index:16;overflow-x:auto;scrollbar-width:none}
+.seasons::-webkit-scrollbar{display:none}
+.seasons-lbl{font-size:9px;letter-spacing:3px;color:var(--mu);text-transform:uppercase;margin-right:4px;white-space:nowrap}
+.stab{display:flex;align-items:center;gap:9px;padding:7px 16px;border-radius:999px;
+  border:1px solid var(--bdr);background:var(--s1);color:var(--mu);
+  font-size:10px;font-weight:600;letter-spacing:2px;text-transform:uppercase;
+  cursor:pointer;transition:all .2s;white-space:nowrap;user-select:none}
+.stab:hover{color:var(--tx);border-color:var(--bdr2)}
+.stab.on{background:linear-gradient(135deg,var(--teal),var(--purple));color:#fff;
+  border-color:var(--accent);box-shadow:0 0 14px rgba(0,212,255,.18)}
+.stab .tag{font-size:8px;letter-spacing:2px;padding:2px 6px;border-radius:4px;background:rgba(255,255,255,.1)}
+.stab.on .tag{background:rgba(0,0,0,.28)}
+
 /* ── TABS ── */
 .tabs{flex:0 0 auto;display:flex;padding:0 32px;border-bottom:1px solid var(--bdr);
   background:var(--s1);position:relative;z-index:15;overflow-x:auto;
@@ -119,6 +135,7 @@ main{padding:24px 32px;max-width:1600px;margin:0 auto}
 .prs{flex:1;background:var(--s2);border-radius:5px;padding:6px 4px;text-align:center;border:1px solid var(--bdr)}
 .prv{font-family:var(--fm);font-size:11px;color:var(--tx)}
 .prl{font-size:8px;letter-spacing:2px;color:var(--mu);text-transform:uppercase;margin-top:1px}
+.pnote{font-size:9px;letter-spacing:2px;color:var(--mu);text-transform:uppercase;text-align:center;margin-top:9px}
 
 /* ── TABLE ── */
 table.gt{width:100%;border-collapse:collapse}
@@ -132,10 +149,14 @@ table.gt tr:hover td{background:rgba(0,120,140,.06)}
 .si{display:flex;align-items:center;padding:9px 12px;border-radius:7px;border:1px solid var(--bdr);
   margin-bottom:6px;background:var(--s2);gap:10px;transition:background .2s}
 .si:hover{background:rgba(0,120,140,.08)}
-.sidate{font-family:var(--fm);font-size:10px;color:var(--mu);min-width:70px}
+.sidate{font-family:var(--fm);font-size:10px;color:var(--mu);min-width:92px}
 .sivs{flex:1;font-weight:500;font-size:12px}
 .sires{font-family:var(--fd);font-size:14px;min-width:50px;text-align:right}
 .sistat{font-size:9px;letter-spacing:2px;text-transform:uppercase;min-width:50px;text-align:right}
+.si.next{border-color:rgba(0,212,255,.35);background:linear-gradient(90deg,rgba(0,120,140,.18),var(--s2))}
+.si.live{border-color:rgba(255,184,0,.5)}
+.seclbl{font-size:9px;letter-spacing:3px;color:var(--mu);text-transform:uppercase;margin:12px 0 8px}
+.seclbl:first-child{margin-top:0}
 
 /* ── PREDICTION CARD ── */
 .predcard{background:linear-gradient(135deg,rgba(29,17,96,.5),rgba(0,120,140,.12));
@@ -177,30 +198,67 @@ table.gt tr:hover td{background:rgba(0,120,140,.06)}
 .stitle{font-family:var(--fd);font-size:26px;letter-spacing:4px;color:#fff;margin-bottom:3px}
 .ssub{font-size:9px;letter-spacing:3px;color:var(--mu);text-transform:uppercase;margin-bottom:16px}
 .divider{height:1px;background:var(--bdr);margin:18px 0}
+.empty{color:var(--mu);font-size:11px;letter-spacing:1px;text-align:center;padding:22px 10px;line-height:1.6}
 
 /* ── SCROLL REGIONS ── */
 .scroll{max-height:360px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--teal) transparent}
 .scroll::-webkit-scrollbar{width:3px}
 .scroll::-webkit-scrollbar-thumb{background:var(--teal);border-radius:2px}
 
+/* ── CLICKABLE PLAYER CARDS + GAME-LOG MODAL ── */
+.pc{cursor:pointer}
+.pc:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.pc .pbody::after{content:'View game log \203A';display:block;text-align:center;margin-top:9px;
+  font-size:9px;letter-spacing:2px;color:var(--teal);text-transform:uppercase;font-weight:600}
+.pc:hover .pbody::after{color:var(--accent)}
+.modal{position:fixed;inset:0;z-index:900;display:none;align-items:flex-start;justify-content:center;
+  padding:4vh 16px;background:rgba(3,3,10,.78);backdrop-filter:blur(6px);overflow-y:auto}
+.modal.on{display:flex}
+.mbox{width:100%;max-width:1120px;background:var(--s1);border:1px solid var(--bdr2);border-radius:14px;
+  box-shadow:0 20px 60px rgba(0,0,0,.6);overflow:hidden}
+.mhead{background:linear-gradient(135deg,var(--purple),#090620);padding:20px 24px;
+  display:flex;justify-content:space-between;align-items:flex-start;gap:16px;position:relative;overflow:hidden}
+.mname{font-family:var(--fd);font-size:30px;letter-spacing:3px;color:#fff;line-height:1.1}
+.msub{font-size:10px;letter-spacing:3px;color:var(--accent);text-transform:uppercase;margin-top:4px}
+.mx{flex:0 0 auto;background:rgba(255,255,255,.08);border:1px solid var(--bdr);color:#fff;
+  width:34px;height:34px;border-radius:8px;cursor:pointer;font-size:18px;line-height:1;transition:background .2s}
+.mx:hover{background:rgba(240,64,64,.35)}
+.mbody{padding:20px 24px}
+.mscroll{max-height:56vh;overflow:auto;border:1px solid var(--bdr);border-radius:9px;scrollbar-width:thin;scrollbar-color:var(--teal) transparent}
+.mscroll table.gt th{position:sticky;top:0;background:var(--s2);z-index:1}
+.mscroll table.gt td,.mscroll table.gt th{white-space:nowrap}
+.pts-hi{color:var(--accent);font-weight:700}
+@media(max-width:680px){.modal{padding:0}.mbox{border-radius:0;min-height:100%}.mbody,.mhead{padding:14px}}
+
+/* ── NEXT GAME PREDICTION CARD ── */
+.gp-meta{font-size:10px;letter-spacing:2px;color:var(--mu);text-transform:uppercase;text-align:center;margin-bottom:12px}
+.gp-score{display:flex;align-items:center;justify-content:center;gap:22px;margin-bottom:12px}
+.gp-team{text-align:center;min-width:92px;opacity:.55}
+.gp-team.win{opacity:1}
+.gp-ab{font-family:var(--fd);font-size:15px;letter-spacing:3px;color:var(--mu)}
+.gp-team.win .gp-ab{color:var(--accent)}
+.gp-pts{font-family:var(--fd);font-size:54px;line-height:1;color:#fff}
+.gp-dash{font-family:var(--fd);font-size:30px;color:var(--mu)}
+.gp-winner{text-align:center;font-size:11px;font-weight:600;letter-spacing:2px;text-transform:uppercase;margin-bottom:10px}
+.gp-bar{height:6px;border-radius:3px;background:rgba(255,255,255,.1);overflow:hidden}
+.gp-bar span{display:block;height:100%;background:linear-gradient(90deg,var(--teal),var(--accent))}
+.gp-barl{display:flex;justify-content:space-between;font-family:var(--fm);font-size:10px;color:var(--mu);margin:5px 0 14px}
+.gp-rest .si{padding:7px 10px;margin-bottom:5px}
+.gp-rest .sidate{min-width:84px}
+
 /* ── MODEL INFO ── */
 .minfo{background:rgba(0,120,140,.07);border:1px solid var(--bdr);border-radius:9px;
   padding:12px 16px;margin-bottom:18px;display:flex;align-items:center;gap:12px}
-
-/* ── REFRESH INDICATOR ── */
-.pulse-row{display:flex;align-items:center;gap:8px;font-size:10px;color:var(--mu);letter-spacing:2px;text-transform:uppercase;margin-bottom:14px}
-.pulse-ring{width:10px;height:10px;border-radius:50%;background:var(--accent);position:relative}
-.pulse-ring::after{content:'';position:absolute;inset:-3px;border-radius:50%;border:1px solid var(--accent);animation:ring 2s ease-out infinite;opacity:0}
-@keyframes ring{0%{transform:scale(1);opacity:.6}100%{transform:scale(2);opacity:0}}
 
 @media(max-width:1050px){.g4{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:680px){
   main{padding:14px 14px}
   header{padding:12px 14px}
-  .tabs{padding:0 14px}
+  .tabs,.seasons{padding-left:14px;padding-right:14px}
   .hdr-center{display:none}
   .g2,.g4{grid-template-columns:1fr}
   .bqs{gap:14px}
+  .seasons-lbl{display:none}
 }
 </style>
 </head>
@@ -212,7 +270,7 @@ table.gt tr:hover td{background:rgba(0,120,140,.06)}
     <div class="hex">🐝</div>
     <div class="logo-text">
       <div class="name">Charlotte Hornets</div>
-      <div class="sub">Command Center · 2025–26</div>
+      <div class="sub" id="hdr-sub">Command Center</div>
     </div>
   </div>
   <div class="hdr-center">
@@ -225,11 +283,14 @@ table.gt tr:hover td{background:rgba(0,120,140,.06)}
   <div class="hdr-right">
     <div class="record">
       <div class="rec-n" id="hdr-rec">– –</div>
-      <div class="rec-l">2025–26 Record</div>
+      <div class="rec-l" id="hdr-rec-label">Record</div>
     </div>
     <button class="btn btn-refresh" id="btn-ref" onclick="manualRefresh()">↻ Refresh</button>
   </div>
 </header>
+
+<!-- SEASON SWITCHER -->
+<div class="seasons" id="seasons"><span class="seasons-lbl">Season</span></div>
 
 <!-- TABS -->
 <div class="tabs">
@@ -248,7 +309,7 @@ table.gt tr:hover td{background:rgba(0,120,140,.06)}
   <div class="banner">
     <div>
       <div class="bnt">Charlotte Hornets</div>
-      <div class="bns">2025–26 NBA · Eastern Conference · Southeast Division</div>
+      <div class="bns" id="ov-sub">NBA · Eastern Conference · Southeast Division</div>
     </div>
     <div class="bqs">
       <div class="bq"><div class="bqv" id="ov-w">–</div><div class="bql">Wins</div></div>
@@ -259,7 +320,7 @@ table.gt tr:hover td{background:rgba(0,120,140,.06)}
   </div>
 
   <div class="stitle">Featured Players</div>
-  <div class="ssub">Season averages · Last 15 games</div>
+  <div class="ssub" id="ov-players-sub">Season averages · Last 15 games</div>
   <div class="g4" id="ov-cards"></div>
 
   <div class="divider"></div>
@@ -269,19 +330,25 @@ table.gt tr:hover td{background:rgba(0,120,140,.06)}
       <div class="ch"><span class="ct">Recent Results</span><span class="cb" id="ov-rec-badge">–</span></div>
       <div class="scroll" id="ov-games"></div>
     </div>
-    <div class="card">
-      <div class="ch"><span class="ct">Next Game Forecasts</span><span class="cb">Ridge ML · Apr 14</span></div>
-      <div id="ov-preds"></div>
+    <div style="display:flex;flex-direction:column;gap:16px;min-width:0">
+      <div class="card">
+        <div class="ch"><span class="ct">Next Game Predictions</span><span class="cb" id="ov-gp-badge">Team model</span></div>
+        <div id="ov-gp"></div>
+      </div>
+      <div class="card">
+        <div class="ch"><span class="ct">Next Game Player Forecasts</span><span class="cb" id="ov-pred-badge">Rolling ML</span></div>
+        <div id="ov-preds"></div>
+      </div>
     </div>
   </div>
 </div>
 
 <!-- SCHEDULE -->
 <div id="p-schedule" class="panel">
-  <div class="stitle">2025–26 Schedule</div>
-  <div class="ssub">Full season game log</div>
+  <div class="stitle" id="sch-title">Schedule</div>
+  <div class="ssub" id="sch-sub">Full season · results and upcoming games</div>
   <div class="card">
-    <div class="ch"><span class="ct">All Games</span><span class="cb" id="sb-badge">2025–26</span></div>
+    <div class="ch"><span class="ct">All Games</span><span class="cb" id="sb-badge">–</span></div>
     <div class="scroll" style="max-height:600px" id="sb-list"></div>
   </div>
 </div>
@@ -289,25 +356,36 @@ table.gt tr:hover td{background:rgba(0,120,140,.06)}
 <!-- PLAYERS -->
 <div id="p-players" class="panel">
   <div class="stitle">Player Statistics</div>
-  <div class="ssub">Individual season averages + full game log · 2025–26</div>
+  <div class="ssub" id="pl-sub">Individual season averages + full game log</div>
   <div id="pl-body"></div>
 </div>
 
 <!-- PREDICTIONS -->
 <div id="p-predictions" class="panel">
   <div class="stitle">ML Forecast Engine</div>
-  <div class="ssub">Ridge Regression · Scikit-learn · Rolling 8-game window · Auto-retrained every 4 hours</div>
+  <div class="ssub">Weighted rolling average · Last 8 games · Auto-refreshed every 4 hours</div>
   <div class="minfo">
     <div style="font-size:22px">🤖</div>
     <div>
-      <div style="font-weight:600;margin-bottom:3px;font-size:13px">Ridge Regression — Trained on Full 2025–26 Season (353+ game records)</div>
-      <div style="font-size:11px;color:var(--mu)">Features: rolling mean/std of PTS, REB, AST over last 8 games + season index. Cross-validated R² confidence. Model auto-retrains every 4 hours with fresh NBA data.</div>
+      <div style="font-weight:600;margin-bottom:3px;font-size:13px">Exponentially Weighted Rolling Average</div>
+      <div style="font-size:11px;color:var(--mu)">Each player's last 8 games are averaged with recent games counting most, then projected onto the next 5 scheduled games for PTS, REB and AST. Returning players carry their latest games over from last season until 8 are on record this year, and confidence is reduced while the sample is small. Players need at least 3 games on record to be forecast.</div>
     </div>
   </div>
   <div class="g2" id="pr-body"></div>
 </div>
 
 </main>
+</div>
+
+<!-- PLAYER GAME-LOG MODAL -->
+<div class="modal" id="pmodal" onclick="if(event.target===this)closePlayer()" role="dialog" aria-modal="true" aria-labelledby="pm-name">
+  <div class="mbox">
+    <div class="mhead">
+      <div><div class="mname" id="pm-name">Player</div><div class="msub" id="pm-sub"></div></div>
+      <button class="mx" onclick="closePlayer()" aria-label="Close">&times;</button>
+    </div>
+    <div class="mbody" id="pm-body"></div>
+  </div>
 </div>
 
 <!-- TOAST -->
@@ -318,24 +396,27 @@ table.gt tr:hover td{background:rgba(0,120,140,.06)}
 
 <script>
 // ═══════════════════════════════════════════════════════
-//  CONFIG
+//  STATE
 // ═══════════════════════════════════════════════════════
-const NUMS = {"LaMelo Ball":"2","Brandon Miller":"24","Miles Bridges":"0","Kon Knueppel":"21"};
-const POS  = {"LaMelo Ball":"Point Guard","Brandon Miller":"Small Forward","Miles Bridges":"Small Forward","Kon Knueppel":"Shooting Guard"};
-
-let teamData=null, playerData=null, predData=null;
+let seasonList=[], currentSeason=null, season=null;
+let teamData=null, playerData=null, predData=null, gamePredData=null;
 let activeTab='overview';
-let sseSource=null;
-let toastTimer=null;
+let sseSource=null, toastTimer=null, fetchToken=0;
+
+const $=id=>document.getElementById(id);
+const setText=(id,t)=>{const e=$(id); if(e) e.textContent=t;};
+const sLabel=s=>s?String(s).replace('-','–'):'';
+const pct=v=>(v==null?'–':v+'%');
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
 // ═══════════════════════════════════════════════════════
 //  TOAST
 // ═══════════════════════════════════════════════════════
 function toast(msg, dur=3500){
   clearTimeout(toastTimer);
-  document.getElementById('toast-msg').textContent=msg;
-  document.getElementById('toast').classList.add('show');
-  toastTimer=setTimeout(()=>document.getElementById('toast').classList.remove('show'), dur);
+  $('toast-msg').textContent=msg;
+  $('toast').classList.add('show');
+  toastTimer=setTimeout(()=>$('toast').classList.remove('show'), dur);
 }
 
 // ═══════════════════════════════════════════════════════
@@ -347,18 +428,18 @@ function connectSSE(){
 
   sseSource.addEventListener('connected', ()=>{
     setLive(true);
-    document.getElementById('last-update').textContent='Live · Connected';
+    $('last-update').textContent='Live · Connected';
   });
 
   sseSource.addEventListener('status', e=>{
     const d=JSON.parse(e.data);
     if(d.refreshing){
-      document.getElementById('btn-ref').classList.add('spin');
-      document.getElementById('btn-ref').textContent='⟳ '+d.message;
+      $('btn-ref').classList.add('spin');
+      $('btn-ref').textContent='⟳ '+d.message;
       toast(d.message, 8000);
     } else {
-      document.getElementById('btn-ref').classList.remove('spin');
-      document.getElementById('btn-ref').textContent='↻ Refresh';
+      $('btn-ref').classList.remove('spin');
+      $('btn-ref').textContent='↻ Refresh';
       toast(d.message, 3000);
     }
   });
@@ -366,7 +447,7 @@ function connectSSE(){
   sseSource.addEventListener('refresh', async e=>{
     const d=JSON.parse(e.data);
     const ts=new Date(d.ts+'Z');
-    document.getElementById('last-update').textContent='Updated '+ts.toLocaleTimeString();
+    $('last-update').textContent='Updated '+ts.toLocaleTimeString();
     toast('✓ Data refreshed — reloading dashboard', 3000);
     await fetchAll();
     renderAll();
@@ -374,46 +455,85 @@ function connectSSE(){
 
   sseSource.onerror=()=>{
     setLive(false);
-    document.getElementById('last-update').textContent='Reconnecting…';
+    $('last-update').textContent='Reconnecting…';
     setTimeout(connectSSE, 5000);
   };
 }
 
 function setLive(on){
-  const dot=document.getElementById('live-dot');
-  const lbl=document.getElementById('live-label');
-  dot.className='dot'+(on?'':' offline');
-  lbl.textContent=on?'Live':'Offline';
+  $('live-dot').className='dot'+(on?'':' offline');
+  $('live-label').textContent=on?'Live':'Offline';
 }
 
 // ═══════════════════════════════════════════════════════
-//  TABS
+//  TABS + SEASON SWITCHER
 // ═══════════════════════════════════════════════════════
 function go(name){
   activeTab=name;
   document.querySelectorAll('.tab').forEach((t,i)=>
     t.classList.toggle('on',['overview','schedule','players','predictions'][i]===name));
   document.querySelectorAll('.panel').forEach(p=>p.classList.remove('on'));
-  document.getElementById('p-'+name).classList.add('on');
+  $('p-'+name).classList.add('on');
+}
+
+async function loadSeasons(){
+  try{
+    const d=await fetch('/api/seasons').then(r=>r.json());
+    seasonList=d.seasons||[]; currentSeason=d.current;
+  }catch(e){ console.error('Seasons error:',e); }
+  const q=new URLSearchParams(location.search).get('season');
+  season=(q&&seasonList.some(s=>s.id===q))?q:currentSeason;
+  renderSeasonTabs();
+}
+
+function renderSeasonTabs(){
+  const tabs=seasonList.map(s=>
+    `<div class="stab${s.id===season?' on':''}" data-season="${esc(s.id)}" onclick="selectSeason('${esc(s.id)}')">
+       ${esc(s.label)} Season<span class="tag">${s.id===currentSeason?'Live':'Final'}</span></div>`).join('');
+  $('seasons').innerHTML='<span class="seasons-lbl">Season</span>'+tabs;
+}
+
+async function selectSeason(id){
+  if(id===season) return;
+  closePlayer();
+  season=id;
+  try{
+    const u=new URL(location.href);
+    if(id===currentSeason) u.searchParams.delete('season'); else u.searchParams.set('season',id);
+    history.replaceState(null,'',u);
+  }catch(e){}
+  renderSeasonTabs();
+  teamData=playerData=predData=gamePredData=null;
+  renderLabels(); showLoading();
+  await fetchAll();
+  renderAll();
+}
+
+function showLoading(){
+  const l='<div class="empty">Loading…</div>';
+  ['ov-cards','ov-games','ov-gp','ov-preds','sb-list','pl-body','pr-body'].forEach(id=>{ const e=$(id); if(e) e.innerHTML=l; });
 }
 
 // ═══════════════════════════════════════════════════════
 //  DATA FETCH
 // ═══════════════════════════════════════════════════════
 async function fetchAll(){
+  const my=++fetchToken, s=season, q='?season='+encodeURIComponent(s);
   try{
-    const [t,p,pr]=await Promise.all([
-      fetch('/api/team').then(r=>r.json()),
-      fetch('/api/players').then(r=>r.json()),
-      fetch('/api/predictions').then(r=>r.json()),
+    const [t,p,pr,gp]=await Promise.all([
+      fetch('/api/team'+q).then(r=>r.json()),
+      fetch('/api/players'+q).then(r=>r.json()),
+      fetch('/api/predictions'+q).then(r=>r.json()),
+      fetch('/api/game_predictions'+q).then(r=>r.json()),
     ]);
-    teamData=t; playerData=p; predData=pr;
+    if(my!==fetchToken||s!==season) return;   // user switched seasons mid-request
+    teamData=t; playerData=p; predData=pr; gamePredData=gp;
   }catch(e){ console.error('Fetch error:',e); }
 }
 
 async function manualRefresh(){
-  document.getElementById('btn-ref').classList.add('spin');
-  document.getElementById('btn-ref').textContent='⟳ Fetching…';
+  $('btn-ref').classList.add('spin');
+  $('btn-ref').textContent='⟳ Fetching…';
   toast('Fetching fresh NBA data…', 10000);
   await fetch('/api/refresh',{method:'POST'});
 }
@@ -421,35 +541,56 @@ async function manualRefresh(){
 // ═══════════════════════════════════════════════════════
 //  RENDER
 // ═══════════════════════════════════════════════════════
+function renderLabels(){
+  const L=sLabel(season), cur=season===currentSeason;
+  setText('hdr-sub',`Command Center · ${L}`);
+  setText('hdr-rec-label',`${L} ${cur?'Record':'Final Record'}`);
+  setText('ov-sub',`${L} NBA · Eastern Conference · Southeast Division`);
+  setText('sch-title',`${L} Schedule`);
+  setText('sch-sub',cur?'Full season · results and upcoming games':'Full season game log');
+  setText('pl-sub',`Individual season averages + full game log · ${L}`);
+  setText('ov-players-sub',cur?'Season averages · Last 15 games · Top minutes + pinned players':'Season averages · Last 15 games');
+}
+
 function renderAll(){
+  renderLabels();
   renderOverview();
+  renderGamePredictions();
   renderSchedule();
   renderPlayers();
   renderPredictions();
 }
 
+const sortedPlayers=()=>Object.entries(playerData||{}).sort((a,b)=>(a[1].rank??99)-(b[1].rank??99));
+const posText=d=>[d.position].filter(Boolean).join('');
+const forecastEmpty=()=>season!==currentSeason
+  ? 'Season complete — no upcoming games to forecast.'
+  : 'Forecasts appear once players have 3+ games on record.';
+
 // ── OVERVIEW ──────────────────────────────────────────
 function renderOverview(){
   if(!teamData||!playerData||!predData) return;
   const info=teamData.info||{};
-  document.getElementById('ov-w').textContent=info.wins??'–';
-  document.getElementById('ov-l').textContent=info.losses??'–';
-  document.getElementById('ov-p').textContent=info.win_pct?(info.win_pct*100).toFixed(0)+'%':'–';
-  document.getElementById('ov-r').textContent=info.conf_rank?'#'+info.conf_rank:'–';
-  document.getElementById('hdr-rec').textContent=info.wins!=null?`${info.wins} – ${info.losses}`:'– –';
-
-  // W-L badge
   const rg=teamData.recent_games||[];
-  const w=rg.filter(g=>g.wl==='W').length;
-  document.getElementById('ov-rec-badge').textContent=`${w}W–${rg.length-w}L recent`;
+  const w=rg.filter(g=>g.wl==='W').length, l=rg.filter(g=>g.wl==='L').length;
+  const wins=info.wins??(rg.length?w:null), losses=info.losses??(rg.length?l:null);
+  const wp=info.win_pct??((wins!=null&&wins+losses>0)?wins/(wins+losses):null);
+  setText('ov-w',wins??'–'); setText('ov-l',losses??'–');
+  setText('ov-p',wp!=null?(wp*100).toFixed(0)+'%':'–');
+  setText('ov-r',info.conf_rank?'#'+info.conf_rank:'–');
+  setText('hdr-rec',wins!=null?`${wins} – ${losses}`:'– –');
+  setText('ov-rec-badge',rg.length?`${w}W–${l}L ${season===currentSeason?'so far':'final'}`:'No games yet');
 
-  // Player mini-cards
-  const c=document.getElementById('ov-cards'); c.innerHTML='';
-  Object.entries(playerData).forEach(([name,d])=>{
+  // Featured player cards
+  const c=$('ov-cards'); c.innerHTML='';
+  let feat=sortedPlayers().filter(([n,d])=>d.featured);
+  if(!feat.length) feat=sortedPlayers().slice(0,4);
+  if(!feat.length) c.innerHTML='<div class="empty" style="grid-column:1/-1">No player data yet.</div>';
+  feat.forEach(([name,d])=>{
     const a=d.averages||{};
-    const el=document.createElement('div'); el.className='pc';
-    el.innerHTML=`<div class="ph"><div class="ph-glow"></div><div class="pnum">${NUMS[name]||''}</div>
-      <div class="pn">${name}</div><div class="pp">${POS[name]||''}</div></div>
+    const el=document.createElement('div'); el.className='pc'; el.tabIndex=0; el.setAttribute('role','button'); el.title='Click for game-by-game stats'; el.onclick=()=>openPlayer(d.player_id); el.onkeydown=e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); openPlayer(d.player_id); } };
+    el.innerHTML=`<div class="ph"><div class="ph-glow"></div><div class="pnum">${esc(d.number)}</div>
+      <div class="pn">${esc(name)}</div><div class="pp">${esc(posText(d))}</div></div>
     <div class="pbody">
       <div class="pgrid">
         <div class="ps"><div class="psv">${a.pts??'–'}</div><div class="psl">PTS</div></div>
@@ -457,70 +598,128 @@ function renderOverview(){
         <div class="ps"><div class="psv">${a.ast??'–'}</div><div class="psl">AST</div></div>
       </div>
       <div class="prow2">
-        <div class="prs"><div class="prv">${a.fg_pct??'–'}%</div><div class="prl">FG%</div></div>
-        <div class="prs"><div class="prv">${a.fg3_pct??'–'}%</div><div class="prl">3P%</div></div>
-        <div class="prs"><div class="prv">${a.ft_pct??'–'}%</div><div class="prl">FT%</div></div>
+        <div class="prs"><div class="prv">${pct(a.fg_pct)}</div><div class="prl">FG%</div></div>
+        <div class="prs"><div class="prv">${pct(a.fg3_pct)}</div><div class="prl">3P%</div></div>
+        <div class="prs"><div class="prv">${pct(a.ft_pct)}</div><div class="prl">FT%</div></div>
       </div>
+      ${a.games?`<div class="pnote">${a.games} game${a.games===1?'':'s'} · ${a.mpg} min</div>`:'<div class="pnote">No games played yet</div>'}
     </div>`;
     c.appendChild(el);
   });
 
-  // Team games table
+  // Team results table
   const rows=rg.slice(0,15).map(g=>`<tr>
-    <td>${g.game_date}</td><td>${g.matchup}</td>
-    <td class="${g.wl==='W'?'ww':'wl'}">${g.wl}</td><td>${g.pts}</td>
+    <td>${esc(fmtGameDate(g.game_date))}</td><td>${esc(g.matchup)}</td>
+    <td class="${g.wl==='W'?'ww':'wl'}">${esc(g.wl)}</td><td>${g.pts}</td>
   </tr>`).join('');
-  document.getElementById('ov-games').innerHTML=`<table class="gt">
+  $('ov-games').innerHTML=rg.length?`<table class="gt">
     <thead><tr><th>Date</th><th>Matchup</th><th>W/L</th><th>PTS</th></tr></thead>
-    <tbody>${rows}</tbody></table>`;
+    <tbody>${rows}</tbody></table>`:'<div class="empty">No games played yet.</div>';
 
-  // Next-game predictions
-  const first={};
-  (predData?Object.values(predData).flat():[]).forEach(p=>{if(!first[p.player_name])first[p.player_name]=p;});
-  document.getElementById('ov-preds').innerHTML=Object.values(first).map(p=>`
+  // Next-game forecasts (top players that have one)
+  const withPreds=sortedPlayers().map(([n])=>n).filter(n=>(predData[n]||[]).length);
+  Object.keys(predData).forEach(n=>{ if(!withPreds.includes(n)) withPreds.push(n); });
+  const top=withPreds.slice(0,4);
+  const next=top.length?predData[top[0]][0]:null;
+  setText('ov-pred-badge',next?`Rolling ML · ${fmtIso(next.game_date)}`:'Rolling ML');
+  $('ov-preds').innerHTML=top.length?top.map(n=>{ const p=predData[n][0]; return `
     <div class="predcard">
-      <div class="pdate">${fmtDate(p.game_date)}</div>
-      <div class="popp">${p.player_name.split(' ').pop()}</div>
+      <div class="pdate">${fmtIso(p.game_date)}</div>
+      <div class="popp">${esc(n.split(' ').pop())}</div>
       <div class="pstats">
         <div class="pst"><div class="pstv" style="color:var(--accent)">${p.pred_pts}</div><div class="pstl">PTS</div></div>
         <div class="pst"><div class="pstv">${p.pred_reb}</div><div class="pstl">REB</div></div>
         <div class="pst"><div class="pstv">${p.pred_ast}</div><div class="pstl">AST</div></div>
       </div>
-    </div>`).join('');
+    </div>`;}).join(''):`<div class="empty">${forecastEmpty()}</div>`;
+}
+
+// ── NEXT GAME PREDICTIONS (team score + winner) ────────
+function renderGamePredictions(){
+  const el=$('ov-gp'); if(!el) return;
+  const list=gamePredData||[];
+  if(!list.length){
+    setText('ov-gp-badge','Team model');
+    el.innerHTML=`<div class="empty">${season!==currentSeason?'Season complete — no upcoming games to predict.':'No upcoming game to predict yet.'}</div>`;
+    return;
+  }
+  const g=list[0], rest=list.slice(1,5);
+  const chaWin=g.winner==='CHA', home=!!g.home, opp=esc(g.opponent);
+  const chaPct=Math.round(g.win_prob*100), oppPct=100-chaPct;
+  const winPct=chaWin?chaPct:oppPct;
+  setText('ov-gp-badge',`Team model · ${fmtIso(g.game_date)}`);
+  const restRows=rest.map(r=>{
+    const w=r.winner==='CHA', pw=Math.round((w?r.win_prob:1-r.win_prob)*100);
+    return `<div class="si">
+      <div class="sidate">${fmtIso(r.game_date,true)}</div>
+      <div class="sivs">${r.home?'vs':'@'} ${esc(r.opponent)}</div>
+      <div class="sires" style="min-width:76px;font-size:13px">${r.pred_pts}–${r.pred_opp_pts}</div>
+      <div class="sistat ${w?'ww':'wl'}" style="min-width:70px">${w?'W':'L'} · ${pw}%</div>
+    </div>`;}).join('');
+  el.innerHTML=`
+    <div class="gp-meta">${home?'vs':'@'} ${opp} · ${fmtIso(g.game_date,true)} · ${fmtTime(g.game_time)}${g.arena?' · '+esc(g.arena):''}</div>
+    <div class="gp-score">
+      <div class="gp-team${chaWin?' win':''}"><div class="gp-ab">CHA</div><div class="gp-pts">${g.pred_pts}</div></div>
+      <div class="gp-dash">–</div>
+      <div class="gp-team${chaWin?'':' win'}"><div class="gp-ab">${opp}</div><div class="gp-pts">${g.pred_opp_pts}</div></div>
+    </div>
+    <div class="gp-winner ${chaWin?'ww':'wl'}">Predicted winner: ${chaWin?'Charlotte Hornets':opp} · ${winPct}%</div>
+    <div class="gp-bar"><span style="width:${chaPct}%"></span></div>
+    <div class="gp-barl"><span>CHA ${chaPct}%</span><span>${opp} ${oppPct}%</span></div>
+    ${restRows?`<div class="seclbl" style="margin-top:2px">Following games</div><div class="gp-rest">${restRows}</div>`:''}`;
 }
 
 // ── SCHEDULE ──────────────────────────────────────────
 function renderSchedule(){
   if(!teamData) return;
   const games=teamData.recent_games||[];
-  const w=games.filter(g=>g.wl==='W').length;
-  document.getElementById('sb-badge').textContent=`${w}W–${games.length-w}L`;
-  document.getElementById('sb-list').innerHTML=games.map(g=>{
+  const up=teamData.upcoming||[];
+  const w=games.filter(g=>g.wl==='W').length, l=games.filter(g=>g.wl==='L').length;
+  setText('sb-badge',`${w}W–${l}L${up.length?` · ${up.length} to play`:''}`);
+
+  let html='';
+  if(up.length){
+    html+=`<div class="seclbl">Upcoming · ${up.length} games</div>`+up.map((g,i)=>{
+      const home=g.home_team==='CHA';
+      const vs=home?`vs ${esc(g.away_team)}`:`@ ${esc(g.home_team)}`;
+      const live=g.status==='Live';
+      return `<div class="si${i===0?' next':''}${live?' live':''}">
+        <div class="sidate">${fmtIso(g.game_date,true)}</div>
+        <div class="sivs">${vs}</div>
+        <div class="sires" style="min-width:84px;font-size:13px">${live?'':fmtTime(g.game_time)}</div>
+        <div class="sistat" style="color:${live?'var(--gold)':'var(--mu)'}">${live?'Live':(home?'Home':'Away')}</div>
+      </div>`;}).join('');
+  }
+  html+=`<div class="seclbl">Results · ${games.length} game${games.length===1?'':'s'}</div>`+(games.map(g=>{
     const cl=g.wl==='W'?'ww':'wl';
     return `<div class="si">
-      <div class="sidate">${g.game_date}</div>
-      <div class="sivs">${g.matchup}</div>
+      <div class="sidate">${esc(fmtGameDate(g.game_date))}</div>
+      <div class="sivs">${esc(g.matchup)}</div>
       <div class="sires ${cl}">${g.pts}</div>
-      <div class="sistat ${cl}">${g.wl}</div>
+      <div class="sistat ${cl}">${esc(g.wl)}</div>
     </div>`;
-  }).join('');
+  }).join('')||'<div class="empty">No games played yet.</div>');
+  $('sb-list').innerHTML=html;
 }
 
 // ── PLAYERS ──────────────────────────────────────────
 function renderPlayers(){
   if(!playerData) return;
-  const c=document.getElementById('pl-body'); c.innerHTML='';
-  Object.entries(playerData).forEach(([name,data])=>{
+  const c=$('pl-body'); c.innerHTML='';
+  const L=sLabel(season);
+  const list=sortedPlayers();
+  if(!list.length) c.innerHTML='<div class="empty">No player data yet.</div>';
+  list.forEach(([name,data])=>{
     const a=data.averages||{};
     const games=(data.recent_games||[]).slice(0,20);
     const rows=games.map(g=>{
       const pm=g.plus_minus>=0?`+${g.plus_minus}`:g.plus_minus;
       const pmc=g.plus_minus>=0?'color:var(--win)':'color:var(--loss)';
       return `<tr>
-        <td>${g.game_date}</td><td>${g.matchup}</td>
-        <td class="${g.wl==='W'?'ww':'wl'}">${g.wl}</td>
+        <td>${esc(fmtGameDate(g.game_date))}</td><td>${esc(g.matchup)}</td>
+        <td class="${g.wl==='W'?'ww':'wl'}">${esc(g.wl)}</td>
         <td>${g.pts}</td><td>${g.reb}</td><td>${g.ast}</td>
-        <td>${g.min}</td>
+        <td>${esc(g.min)}</td>
         <td>${(g.fg_pct*100).toFixed(0)}%</td>
         <td>${(g.fg3_pct*100).toFixed(0)}%</td>
         <td style="${pmc}">${pm}</td>
@@ -530,18 +729,18 @@ function renderPlayers(){
     sec.innerHTML=`<div class="card">
       <div class="ch" style="margin-bottom:14px">
         <div>
-          <div class="ct" style="font-size:20px">${name}</div>
-          <div style="font-size:9px;letter-spacing:3px;color:var(--teal);text-transform:uppercase;margin-top:1px">#${NUMS[name]??'?'} · ${POS[name]??''}</div>
+          <div class="ct" style="font-size:20px">${esc(name)}</div>
+          <div style="font-size:9px;letter-spacing:3px;color:var(--teal);text-transform:uppercase;margin-top:1px">#${esc(data.number||'–')} · ${esc(posText(data))}</div>
         </div>
-        <div class="cb">2025–26</div>
+        <div style="display:flex;gap:10px;align-items:center"><div class="cb">${L}</div><button class="btn btn-refresh" onclick="openPlayer(${data.player_id})">Full game log</button></div>
       </div>
       <div class="srow">
         <div class="sb"><div class="sv" style="color:var(--accent)">${a.pts??'–'}</div><div class="sl">PPG</div></div>
         <div class="sb"><div class="sv">${a.reb??'–'}</div><div class="sl">RPG</div></div>
         <div class="sb"><div class="sv">${a.ast??'–'}</div><div class="sl">APG</div></div>
-        <div class="sb"><div class="sv">${a.fg_pct??'–'}%</div><div class="sl">FG%</div></div>
-        <div class="sb"><div class="sv">${a.fg3_pct??'–'}%</div><div class="sl">3P%</div></div>
-        <div class="sb"><div class="sv">${a.ft_pct??'–'}%</div><div class="sl">FT%</div></div>
+        <div class="sb"><div class="sv">${pct(a.fg_pct)}</div><div class="sl">FG%</div></div>
+        <div class="sb"><div class="sv">${pct(a.fg3_pct)}</div><div class="sl">3P%</div></div>
+        <div class="sb"><div class="sv">${pct(a.ft_pct)}</div><div class="sl">FT%</div></div>
         <div class="sb"><div class="sv">${a.stl??'–'}</div><div class="sl">STL</div></div>
         <div class="sb"><div class="sv">${a.blk??'–'}</div><div class="sl">BLK</div></div>
         <div class="sb"><div class="sv">${a.tov??'–'}</div><div class="sl">TOV</div></div>
@@ -549,7 +748,7 @@ function renderPlayers(){
       <div style="font-size:9px;letter-spacing:3px;color:var(--mu);text-transform:uppercase;margin:10px 0 6px">Game Log</div>
       <div class="scroll" style="max-height:260px"><table class="gt">
         <thead><tr><th>Date</th><th>Matchup</th><th>W/L</th><th>PTS</th><th>REB</th><th>AST</th><th>MIN</th><th>FG%</th><th>3P%</th><th>+/-</th></tr></thead>
-        <tbody>${rows||'<tr><td colspan="10" style="color:var(--mu);text-align:center;padding:14px">No data</td></tr>'}</tbody>
+        <tbody>${rows||'<tr><td colspan="10" style="color:var(--mu);text-align:center;padding:14px">No games played yet</td></tr>'}</tbody>
       </table></div>
     </div>`;
     c.appendChild(sec);
@@ -558,15 +757,19 @@ function renderPlayers(){
 
 // ── PREDICTIONS ──────────────────────────────────────
 function renderPredictions(){
-  if(!predData) return;
-  const c=document.getElementById('pr-body'); c.innerHTML='';
-  Object.entries(predData).forEach(([name,preds])=>{
+  if(!predData||!playerData) return;
+  const c=$('pr-body'); c.innerHTML='';
+  const names=Object.keys(predData).sort((a,b)=>((playerData[a]||{}).rank??99)-((playerData[b]||{}).rank??99));
+  if(!names.length){ c.innerHTML=`<div class="card" style="grid-column:1/-1"><div class="empty">${forecastEmpty()}</div></div>`; return; }
+  names.forEach(name=>{
+    const preds=predData[name], pd=playerData[name]||{};
     const items=preds.map(p=>{
       const conf=Math.round((p.confidence||0.45)*100);
       const cc=conf>55?'var(--win)':conf>40?'var(--accent)':'var(--mu)';
+      const opp=/^(vs|@)/.test(p.opponent)?p.opponent:'vs '+p.opponent;
       return `<div class="predcard">
-        <div class="pdate">${fmtDate(p.game_date)}</div>
-        <div class="popp">vs ${p.opponent}</div>
+        <div class="pdate">${fmtIso(p.game_date)}</div>
+        <div class="popp">${esc(opp)}</div>
         <div class="pstats">
           <div class="pst"><div class="pstv" style="color:var(--accent)">${p.pred_pts}</div><div class="pstl">PTS</div></div>
           <div class="pst"><div class="pstv">${p.pred_reb}</div><div class="pstl">REB</div></div>
@@ -581,18 +784,94 @@ function renderPredictions(){
     }).join('');
     const card=document.createElement('div'); card.className='card'; card.style.marginBottom='0';
     card.innerHTML=`<div class="ch"><div>
-      <div class="ct">${name}</div>
-      <div style="font-size:9px;color:var(--mu);letter-spacing:2px;text-transform:uppercase;margin-top:1px">#${NUMS[name]??'?'} · ${POS[name]??''}</div>
-    </div><div class="cb">Ridge ML</div></div>${items}`;
+      <div class="ct">${esc(name)}</div>
+      <div style="font-size:9px;color:var(--mu);letter-spacing:2px;text-transform:uppercase;margin-top:1px">#${esc(pd.number||'–')} · ${esc(posText(pd))}</div>
+    </div><div class="cb">Rolling ML</div></div>${items}`;
     c.appendChild(card);
   });
 }
 
+// ── PLAYER GAME LOG MODAL ────────────────────────────
+let modalToken=0;
+function playerBase(pid){
+  const e=Object.entries(playerData||{}).find(([n,d])=>d.player_id===pid);
+  return e?{name:e[0],...e[1]}:{};
+}
+async function openPlayer(pid){
+  const my=++modalToken, s=season, L=sLabel(s), base=playerBase(pid);
+  const m=$('pmodal'); m.classList.add('on'); m.scrollTop=0;
+  $('pm-name').textContent=base.name||'Player';
+  $('pm-sub').textContent=`#${base.number||'–'} · ${base.position||''} · ${L} Season`;
+  $('pm-body').innerHTML='<div class="empty">Loading game log…</div>';
+  try{
+    const d=await fetch(`/api/player/${pid}?season=${encodeURIComponent(s)}`).then(r=>{ if(!r.ok) throw new Error(r.status); return r.json(); });
+    if(my!==modalToken) return;
+    renderPlayerModal(d);
+  }catch(e){
+    if(my===modalToken) $('pm-body').innerHTML='<div class="empty">Could not load the game log. Try again in a moment.</div>';
+  }
+}
+function closePlayer(){ modalToken++; $('pmodal').classList.remove('on'); }
+document.addEventListener('keydown',e=>{ if(e.key==='Escape') closePlayer(); });
+
+function renderPlayerModal(d){
+  const a=d.averages||{}, games=d.games||[], L=sLabel(d.season);
+  $('pm-name').textContent=d.name;
+  $('pm-sub').textContent=`#${d.number||'–'} · ${d.position||''} · ${L} Season`;
+  if(!games.length){
+    $('pm-body').innerHTML=`<div class="empty">${esc(d.name)} hasn't played a game in ${L} yet.<br/>The game log fills in automatically after their first game.</div>`;
+    return;
+  }
+  const hi=Math.max(...games.map(g=>g.pts||0));
+  const box=(v,l,c)=>`<div class="sb"><div class="sv"${c?` style="color:${c}"`:''}>${v??'–'}</div><div class="sl">${l}</div></div>`;
+  const rows=games.map((g,i)=>{
+    const pm=g.plus_minus>=0?`+${g.plus_minus}`:g.plus_minus;
+    const pmc=g.plus_minus>=0?'var(--win)':'var(--loss)';
+    return `<tr>
+      <td style="color:var(--mu)">${games.length-i}</td>
+      <td>${esc(fmtGameDate(g.game_date))}</td><td>${esc(g.matchup)}</td>
+      <td class="${g.wl==='W'?'ww':'wl'}">${esc(g.wl)}</td>
+      <td>${esc(g.min)}</td>
+      <td class="${g.pts===hi?'pts-hi':''}">${g.pts}</td><td>${g.reb}</td><td>${g.ast}</td>
+      <td>${g.stl}</td><td>${g.blk}</td><td>${g.tov}</td>
+      <td>${g.fgm}-${g.fga}</td><td>${g.fg3m}-${g.fg3a}</td><td>${g.ftm}-${g.fta}</td>
+      <td style="color:${pmc}">${pm}</td>
+    </tr>`;
+  }).join('');
+  $('pm-body').innerHTML=`
+    <div class="srow">
+      ${box(a.games,'GP')}${box(a.mpg,'MPG')}${box(a.pts,'PPG','var(--accent)')}${box(a.reb,'RPG')}${box(a.ast,'APG')}
+      ${box(pct(a.fg_pct),'FG%')}${box(pct(a.fg3_pct),'3P%')}${box(pct(a.ft_pct),'FT%')}
+      ${box(a.stl,'STL')}${box(a.blk,'BLK')}${box(a.tov,'TOV')}
+    </div>
+    <div style="font-size:9px;letter-spacing:3px;color:var(--mu);text-transform:uppercase;margin:14px 0 8px">
+      Game by game · ${games.length} game${games.length===1?'':'s'} · season high ${hi} PTS</div>
+    <div class="mscroll"><table class="gt">
+      <thead><tr><th>#</th><th>Date</th><th>Matchup</th><th>W/L</th><th>MIN</th><th>PTS</th><th>REB</th><th>AST</th>
+        <th>STL</th><th>BLK</th><th>TOV</th><th>FG</th><th>3P</th><th>FT</th><th>+/-</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>`;
+}
+
 // ── UTILS ──────────────────────────────────────────
-function fmtDate(d){
-  if(!d) return '–';
-  try{ const p=new Date(d); if(!isNaN(p)) return p.toLocaleDateString('en-US',{month:'short',day:'numeric'}); }catch(e){}
-  return String(d).substring(0,8);
+// 'APR 12, 2026' / 'Oct 30, 2025' -> 'Apr 12, 2026'
+function fmtGameDate(s){
+  if(!s) return '–';
+  const d=new Date(s);
+  return isNaN(d)?String(s):d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+}
+// '2026-10-24' -> 'Oct 24' (or 'Sat, Oct 24'); parsed as a local date so it never shifts a day
+function fmtIso(d,dow){
+  const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(d||'');
+  if(!m) return d||'–';
+  const dt=new Date(+m[1],+m[2]-1,+m[3]);
+  return dt.toLocaleDateString('en-US',dow?{weekday:'short',month:'short',day:'numeric'}:{month:'short',day:'numeric'});
+}
+// '19:00' (Eastern) -> '7:00 PM ET'
+function fmtTime(t){
+  const m=/^(\d{1,2}):(\d{2})/.exec(t||'');
+  if(!m) return 'TBD';
+  let h=+m[1]; const ap=h>=12?'PM':'AM'; h=h%12||12;
+  return `${h}:${m[2]} ${ap} ET`;
 }
 
 // ═══════════════════════════════════════════════════════
@@ -600,10 +879,13 @@ function fmtDate(d){
 // ═══════════════════════════════════════════════════════
 (async()=>{
   connectSSE();
+  await loadSeasons();
+  renderLabels(); showLoading();
   await fetchAll();
   renderAll();
+  const pq=new URLSearchParams(location.search).get('player'); if(pq&&/^\d+$/.test(pq)) openPlayer(+pq);
 
-  // Re-render active tab data every 30s as a fallback
+  // Re-render the selected season every 30s as a fallback
   setInterval(async()=>{
     await fetchAll();
     renderAll();
