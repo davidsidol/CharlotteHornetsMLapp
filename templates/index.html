@@ -21,6 +21,9 @@ body{background:var(--bg);color:var(--tx);font-family:var(--fb);display:flex;fle
 body::before{content:'';position:fixed;inset:0;
   background-image:linear-gradient(rgba(0,120,140,.03) 1px,transparent 1px),linear-gradient(90deg,rgba(0,120,140,.03) 1px,transparent 1px);
   background-size:48px 48px;pointer-events:none;z-index:0}
+body::after{content:'';position:fixed;inset:0;background:url('/static/HornetsLogo_bg.png') center center / contain no-repeat;opacity:.45;pointer-events:none;z-index:-1}
+body .card,body .pc{background:rgba(14,14,28,.82)}
+
 
 /* ── HEADER ── */
 header{flex:0 0 auto;position:relative;z-index:20;
@@ -122,7 +125,7 @@ main{padding:24px 32px;max-width:1600px;margin:0 auto}
 .ph{background:linear-gradient(135deg,var(--purple),#090620);padding:16px;position:relative;overflow:hidden;min-height:80px}
 .ph-glow{position:absolute;right:-10px;top:-10px;width:80px;height:80px;
   background:radial-gradient(circle,rgba(0,212,255,.15),transparent 70%);pointer-events:none}
-.pnum{font-family:var(--fd);font-size:52px;color:rgba(255,255,255,.05);
+.pnum{font-family:var(--fd);font-size:52px;color:var(--accent);
   position:absolute;right:8px;top:2px;line-height:1;pointer-events:none}
 .pn{font-family:var(--fd);font-size:17px;letter-spacing:2px;color:#fff;position:relative}
 .pp{font-size:9px;letter-spacing:3px;color:var(--accent);text-transform:uppercase;margin-top:2px;position:relative}
@@ -243,6 +246,8 @@ table.gt tr:hover td{background:rgba(0,120,140,.06)}
 .gp-bar{height:6px;border-radius:3px;background:rgba(255,255,255,.1);overflow:hidden}
 .gp-bar span{display:block;height:100%;background:linear-gradient(90deg,var(--teal),var(--accent))}
 .gp-barl{display:flex;justify-content:space-between;font-family:var(--fm);font-size:10px;color:var(--mu);margin:5px 0 14px}
+.gp-rec{margin-top:16px;padding-top:6px;border-top:1px solid var(--bdr)}
+.gp-recnote{font-size:10px;color:var(--mu);letter-spacing:1px;margin:2px 0 10px;line-height:1.5}
 .gp-rest .si{padding:7px 10px;margin-bottom:5px}
 .gp-rest .sidate{min-width:84px}
 
@@ -399,7 +404,7 @@ table.gt tr:hover td{background:rgba(0,120,140,.06)}
 //  STATE
 // ═══════════════════════════════════════════════════════
 let seasonList=[], currentSeason=null, season=null;
-let teamData=null, playerData=null, predData=null, gamePredData=null;
+let teamData=null, playerData=null, predData=null, gamePredData=null, gameRecData=null;
 let activeTab='overview';
 let sseSource=null, toastTimer=null, fetchToken=0;
 
@@ -503,7 +508,7 @@ async function selectSeason(id){
     history.replaceState(null,'',u);
   }catch(e){}
   renderSeasonTabs();
-  teamData=playerData=predData=gamePredData=null;
+  teamData=playerData=predData=gamePredData=gameRecData=null;
   renderLabels(); showLoading();
   await fetchAll();
   renderAll();
@@ -520,14 +525,15 @@ function showLoading(){
 async function fetchAll(){
   const my=++fetchToken, s=season, q='?season='+encodeURIComponent(s);
   try{
-    const [t,p,pr,gp]=await Promise.all([
+    const [t,p,pr,gp,gr]=await Promise.all([
       fetch('/api/team'+q).then(r=>r.json()),
       fetch('/api/players'+q).then(r=>r.json()),
       fetch('/api/predictions'+q).then(r=>r.json()),
       fetch('/api/game_predictions'+q).then(r=>r.json()),
+      fetch('/api/game_record'+q).then(r=>r.json()),
     ]);
     if(my!==fetchToken||s!==season) return;   // user switched seasons mid-request
-    teamData=t; playerData=p; predData=pr; gamePredData=gp;
+    teamData=t; playerData=p; predData=pr; gamePredData=gp; gameRecData=gr;
   }catch(e){ console.error('Fetch error:',e); }
 }
 
@@ -635,12 +641,34 @@ function renderOverview(){
 }
 
 // ── NEXT GAME PREDICTIONS (team score + winner) ────────
+function renderRecord(r){
+  const head='<div class="gp-rec"><div class="seclbl">Prediction record</div>';
+  if(!r||!r.total){
+    return head+'<div class="empty" style="padding:10px">No finished games graded yet — the record starts after the next game.</div></div>';
+  }
+  const box=(v,l,c)=>`<div class="sb"><div class="sv" style="color:${c}">${v}</div><div class="sl">${l}</div></div>`;
+  const wc=r.win_calls||{correct:0,total:0}, lc=r.loss_calls||{correct:0,total:0};
+  const rows=(r.recent||[]).map(x=>{
+    const ok=!!x.correct;
+    return `<div class="si">
+      <div class="sidate">${fmtIso(x.game_date,true)}</div>
+      <div class="sivs">${x.home?'vs':'@'} ${esc(x.opponent)}</div>
+      <div class="sires" style="min-width:210px;font-size:12px">Pred ${x.pred_pts}–${x.pred_opp_pts} · Final ${x.actual_pts}–${x.actual_opp_pts}</div>
+      <div class="sistat ${ok?'ww':'wl'}" style="min-width:54px">${ok?'✓ Right':'✗ Miss'}</div>
+    </div>`;}).join('');
+  const bt=r.backtest?`<div class="gp-recnote">${r.backtest} of ${r.total} games were back-tested: predicted afterwards using only games played before tip-off (and last season). The rest were locked in before the game.</div>`:'';
+  return head+`<div class="srow">${box(r.correct,'Correct','var(--win)')}${box(r.wrong,'Wrong','var(--loss)')}${box(r.pct+'%','Accuracy','var(--accent)')}</div>
+    <div class="gp-recnote">Hornets wins called right: ${wc.correct}/${wc.total} · Hornets losses called right: ${lc.correct}/${lc.total}</div>
+    ${rows}${bt}</div>`;
+}
+
 function renderGamePredictions(){
   const el=$('ov-gp'); if(!el) return;
   const list=gamePredData||[];
+  const rec=renderRecord(gameRecData);
   if(!list.length){
     setText('ov-gp-badge','Team model');
-    el.innerHTML=`<div class="empty">${season!==currentSeason?'Season complete — no upcoming games to predict.':'No upcoming game to predict yet.'}</div>`;
+    el.innerHTML=`<div class="empty">${season!==currentSeason?'Season complete — no upcoming games to predict.':'No upcoming game to predict yet.'}</div>`+rec;
     return;
   }
   const g=list[0], rest=list.slice(1,5);
@@ -666,7 +694,7 @@ function renderGamePredictions(){
     <div class="gp-winner ${chaWin?'ww':'wl'}">Predicted winner: ${chaWin?'Charlotte Hornets':opp} · ${winPct}%</div>
     <div class="gp-bar"><span style="width:${chaPct}%"></span></div>
     <div class="gp-barl"><span>CHA ${chaPct}%</span><span>${opp} ${oppPct}%</span></div>
-    ${restRows?`<div class="seclbl" style="margin-top:2px">Following games</div><div class="gp-rest">${restRows}</div>`:''}`;
+    ${restRows?`<div class="seclbl" style="margin-top:2px">Following games</div><div class="gp-rest">${restRows}</div>`:''}${rec}`;
 }
 
 // ── SCHEDULE ──────────────────────────────────────────

@@ -173,8 +173,27 @@ def api_game_predictions():
     """Predicted score + winner for the Hornets' next games."""
     season = _season_arg()
     today  = date.today().isoformat()
-    return jsonify(query("SELECT * FROM game_predictions WHERE season=? AND game_date >= ? "
-                         "ORDER BY game_date ASC, game_id ASC", (season, today)))
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")      # server clock is Eastern, like the stored tip times
+    return jsonify(query("SELECT * FROM game_predictions WHERE season=? AND result IS NULL AND game_date >= ? "
+                         "AND (game_date || ' ' || COALESCE(game_time, '00:00')) > ? "
+                         "ORDER BY game_date ASC, game_id ASC", (season, today, now)))
+
+@app.route("/api/game_record")
+def api_game_record():
+    """Track record of the team game predictions: correct / wrong, accuracy, and the latest graded games."""
+    season = _season_arg()
+    rows = query("SELECT * FROM game_predictions WHERE season=? AND result IS NOT NULL "
+                 "ORDER BY game_date DESC, game_id DESC", (season,))
+    total = len(rows)
+    ok = sum(r["correct"] or 0 for r in rows)
+    def split(win_call):
+        sub = [r for r in rows if (r["winner"] == "CHA") == win_call]
+        return {"correct": sum(r["correct"] or 0 for r in sub), "total": len(sub)}
+    return jsonify({"season": season, "total": total, "correct": ok, "wrong": total - ok,
+                    "pct": round(100.0 * ok / total, 1) if total else None,
+                    "win_calls": split(True), "loss_calls": split(False),
+                    "backtest": sum(1 for r in rows if r["source"] == "backtest"),
+                    "recent": rows[:5]})
 
 @app.route("/api/predictions")
 def api_predictions():

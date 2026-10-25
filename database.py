@@ -261,6 +261,12 @@ def init_db():
     # Predictions that existed before seasons were tracked belong to the 2025-26 build.
     cur.execute("UPDATE predictions SET season = '2025-26' WHERE season IS NULL")
 
+    # Prediction track record: results are filled in after each game; 'source' is live or backtest.
+    for col, decl in (("actual_pts", "INTEGER"), ("actual_opp_pts", "INTEGER"),
+                      ("result", "TEXT"), ("correct", "INTEGER"), ("source", "TEXT")):
+        _add_column(cur, "game_predictions", col, decl)
+    cur.execute("UPDATE game_predictions SET source='live' WHERE source IS NULL")
+
     cur.execute("CREATE INDEX IF NOT EXISTS idx_ps_season_player ON player_stats(season, player_id, game_date_iso)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_tg_season ON team_games(season, game_date_iso)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_sched_season ON schedule(season, game_date)")
@@ -359,13 +365,16 @@ def save_league_games(season: str, rows: list):
     conn.close()
 
 def save_game_predictions(season: str, rows: list):
-    """Replaces the season's team game predictions. rows: (game_id, game_date, game_time, opponent, home, arena,
-    pred_pts, pred_opp_pts, win_prob, winner, model_version, created_at)."""
+    """Stores predictions for UPCOMING games. Rows for games that have started (or finished) are kept
+    untouched, so every prediction is locked in before tip-off and can be graded afterwards.
+    rows: (game_id, game_date, game_time, opponent, home, arena, pred_pts, pred_opp_pts, win_prob,
+           winner, model_version, created_at)."""
     conn = get_connection()
-    conn.execute("DELETE FROM game_predictions WHERE season=?", (season,))
-    conn.executemany("INSERT INTO game_predictions (season, game_id, game_date, game_time, opponent, home, arena, "
-                     "pred_pts, pred_opp_pts, win_prob, winner, model_version, created_at) "
-                     "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", [(season,) + tuple(r) for r in rows])
+    conn.execute("DELETE FROM game_predictions WHERE season=? AND result IS NULL AND game_id IN "
+                 "(SELECT game_id FROM schedule WHERE season=? AND status='Scheduled')", (season, season))
+    conn.executemany("INSERT OR REPLACE INTO game_predictions (season, game_id, game_date, game_time, opponent, home, "
+                     "arena, pred_pts, pred_opp_pts, win_prob, winner, model_version, created_at, source) "
+                     "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'live')", [(season,) + tuple(r) for r in rows])
     conn.commit()
     conn.close()
 
@@ -399,3 +408,15 @@ def query(sql, params=()):
     rows = [dict(r) for r in cur.fetchall()]
     conn.close()
     return rows
+
+def execute(sql, params=()):
+    conn = get_connection()
+    conn.execute(sql, params)
+    conn.commit()
+    conn.close()
+
+def execute_many(sql, rows):
+    conn = get_connection()
+    conn.executemany(sql, rows)
+    conn.commit()
+    conn.close()

@@ -89,6 +89,8 @@ def fetch_player_stats(season):
         logs = data.get("PlayerGameLogs", [])
         rows = []
         for g in logs:
+            if not g.get("WL"):                      # game still in progress
+                continue
             rows.append((
                 int(g["PLAYER_ID"]), str(g["PLAYER_NAME"]),
                 str(g["GAME_ID"]), _fmt_log_date(g["GAME_DATE"]), str(g["MATCHUP"]), str(g.get("WL") or ""),
@@ -115,6 +117,8 @@ def fetch_team_games(season):
         ).get_normalized_dict()
         rows = []
         for g in data.get("TeamGameLog", []):
+            if not g.get("WL"):                      # game still in progress
+                continue
             rows.append((
                 str(g["Game_ID"]), str(g["GAME_DATE"]), str(g["MATCHUP"]), str(g["WL"]),
                 _safe_int(g["PTS"]), 0,
@@ -257,4 +261,5 @@ def refresh_all(season=None):
     time.sleep(0.6)
     fetch_league_games(season)
     fetch_league_games(prev_season(season), refresh=False)
+    fetch_league_games(prev_season(prev_season(season)), refresh=False)   # prior for back-testing last season
     logger.info(f"Data refresh complete for {season}.")

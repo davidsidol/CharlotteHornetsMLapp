@@ -4,7 +4,8 @@ __pycache__/
 *.pyc
 *.pyo
 .env
-static/
+static/*
 backups/
 out.txt
 err.txt
+!static/HornetsLogo_bg.png
