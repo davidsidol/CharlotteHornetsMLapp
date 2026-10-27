@@ -195,6 +195,68 @@ def api_game_record():
                     "backtest": sum(1 for r in rows if r["source"] == "backtest"),
                     "recent": rows[:5]})
 
+@app.route("/api/model_form")
+def api_model_form():
+    """Hot/cold form of the team-game predictions plus the model's most confident bet for the next game."""
+    from statistics import NormalDist
+    from ml_predictions import MARGIN_SD
+    season = _season_arg()
+    rows = query("SELECT * FROM game_predictions WHERE season=? AND result IS NOT NULL "
+                 "ORDER BY game_date ASC, game_id ASC", (season,))
+    seq = [bool(r["correct"]) for r in rows]
+    n = len(seq)
+    streak, kind = 0, None
+    if seq:
+        kind = seq[-1]
+        for v in reversed(seq):
+            if v != kind:
+                break
+            streak += 1
+    last5 = seq[-5:]
+    l5 = sum(last5)
+    frac = (l5 / len(last5)) if last5 else 0
+    if n < 3:
+        status = "none"
+    elif (kind and streak >= 3) or (len(last5) >= 4 and frac >= 0.8):
+        status = "hot"
+    elif ((not kind) and streak >= 2) or (len(last5) >= 4 and frac <= 0.4):
+        status = "cold"
+    else:
+        status = "steady"
+    form = [{"ok": bool(r["correct"]), "opp": r["opponent"], "home": bool(r["home"]), "date": r["game_date"]}
+            for r in rows[-10:]]
+
+    best = None
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    nxt = query("SELECT * FROM game_predictions WHERE season=? AND result IS NULL AND game_date >= ? "
+                "AND (game_date || ' ' || COALESCE(game_time, '00:00')) > ? "
+                "ORDER BY game_date ASC, game_id ASC LIMIT 1", (season, date.today().isoformat(), now))
+    if nxt:
+        g = nxt[0]
+        pw = float(g["win_prob"])
+        pick_cha = pw >= 0.5
+        conf = pw if pick_cha else 1 - pw
+        nd = NormalDist()
+        margin = MARGIN_SD * nd.inv_cdf(pw)               # predicted Hornets margin
+        fav = abs(margin)
+        by5 = 1 - nd.cdf((5 - fav) / MARGIN_SD)           # chance the favourite wins by 5+
+        if conf >= 0.75:   tier = "Strong"
+        elif conf >= 0.65: tier = "Solid"
+        elif conf >= 0.58: tier = "Lean"
+        else:              tier = "Pass"
+        similar = [r for r in rows if abs(max(float(r["win_prob"]), 1 - float(r["win_prob"])) - conf) <= 0.08]
+        best = {"game_date": g["game_date"], "game_time": g["game_time"], "home": bool(g["home"]),
+                "opponent": g["opponent"], "pick": "CHA" if pick_cha else g["opponent"],
+                "pick_is_cha": pick_cha, "confidence": round(conf * 100), "tier": tier,
+                "fav_margin": round(fav, 1), "win_by_5": round(by5 * 100),
+                "pred_pts": g["pred_pts"], "pred_opp_pts": g["pred_opp_pts"],
+                "similar": {"correct": sum(1 for r in similar if r["correct"]), "total": len(similar)}}
+    return jsonify({"season": season, "graded": n, "status": status, "streak": streak,
+                    "streak_kind": ("W" if kind else "L") if seq else None,
+                    "last5": {"correct": l5, "total": len(last5)},
+                    "last10": {"correct": sum(seq[-10:]), "total": len(seq[-10:])},
+                    "form": form, "best": best})
+
 @app.route("/api/predictions")
 def api_predictions():
     season = _season_arg()

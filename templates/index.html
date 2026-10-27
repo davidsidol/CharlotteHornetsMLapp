@@ -265,6 +265,22 @@ table.gt tr:hover td{background:rgba(0,120,140,.06)}
   .bqs{gap:14px}
   .seasons-lbl{display:none}
 }
+
+.fm-top{display:flex;align-items:center;gap:14px;margin-bottom:12px}
+.fm-badge{font-family:var(--fd);font-size:26px;letter-spacing:2px;padding:6px 14px;border-radius:9px;border:1px solid var(--bdr);line-height:1}
+.fm-hot{color:#ff9f1c;border-color:rgba(255,159,28,.55);background:rgba(255,120,0,.12)}
+.fm-cold{color:#5cc8ff;border-color:rgba(92,200,255,.55);background:rgba(40,120,200,.14)}
+.fm-steady{color:var(--tx);background:var(--s2)}
+.fm-sub{font-size:12px;color:var(--mu);line-height:1.5}
+.fm-sub b{color:var(--tx)}
+.fm-dots{display:flex;gap:6px;margin:2px 0 14px}
+.fm-dot{width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#06060c}
+.fm-dot.ok{background:var(--win)}.fm-dot.no{background:var(--loss)}
+.bb{background:var(--s2);border:1px solid var(--bdr);border-radius:10px;padding:12px 14px;margin-top:4px}
+.bb-pick{font-family:var(--fd);font-size:22px;letter-spacing:1px;color:#fff;margin:2px 0 6px}
+.bb-tier{display:inline-block;font-size:10px;letter-spacing:2px;text-transform:uppercase;padding:2px 8px;border-radius:5px;margin-left:8px;vertical-align:middle;border:1px solid currentColor}
+.bb-meta{font-size:12px;color:var(--mu);line-height:1.6}
+.bb-meta b{color:var(--tx)}
 </style>
 </head>
 <body>
@@ -344,6 +360,10 @@ table.gt tr:hover td{background:rgba(0,120,140,.06)}
         <div class="ch"><span class="ct">Next Game Player Forecasts</span><span class="cb" id="ov-pred-badge">Rolling ML</span></div>
         <div id="ov-preds"></div>
       </div>
+      <div class="card">
+        <div class="ch"><span class="ct">Model Form &amp; Best Bet</span><span class="cb" id="ov-form-badge">–</span></div>
+        <div id="ov-form"></div>
+      </div>
     </div>
   </div>
 </div>
@@ -404,7 +424,7 @@ table.gt tr:hover td{background:rgba(0,120,140,.06)}
 //  STATE
 // ═══════════════════════════════════════════════════════
 let seasonList=[], currentSeason=null, season=null;
-let teamData=null, playerData=null, predData=null, gamePredData=null, gameRecData=null;
+let teamData=null, playerData=null, predData=null, gamePredData=null, gameRecData=null, formData=null;
 let activeTab='overview';
 let sseSource=null, toastTimer=null, fetchToken=0;
 
@@ -508,7 +528,7 @@ async function selectSeason(id){
     history.replaceState(null,'',u);
   }catch(e){}
   renderSeasonTabs();
-  teamData=playerData=predData=gamePredData=gameRecData=null;
+  teamData=playerData=predData=gamePredData=gameRecData=formData=null;
   renderLabels(); showLoading();
   await fetchAll();
   renderAll();
@@ -516,7 +536,7 @@ async function selectSeason(id){
 
 function showLoading(){
   const l='<div class="empty">Loading…</div>';
-  ['ov-cards','ov-games','ov-gp','ov-preds','sb-list','pl-body','pr-body'].forEach(id=>{ const e=$(id); if(e) e.innerHTML=l; });
+  ['ov-cards','ov-games','ov-gp','ov-preds','ov-form','sb-list','pl-body','pr-body'].forEach(id=>{ const e=$(id); if(e) e.innerHTML=l; });
 }
 
 // ═══════════════════════════════════════════════════════
@@ -525,15 +545,16 @@ function showLoading(){
 async function fetchAll(){
   const my=++fetchToken, s=season, q='?season='+encodeURIComponent(s);
   try{
-    const [t,p,pr,gp,gr]=await Promise.all([
+    const [t,p,pr,gp,gr,mf]=await Promise.all([
       fetch('/api/team'+q).then(r=>r.json()),
       fetch('/api/players'+q).then(r=>r.json()),
       fetch('/api/predictions'+q).then(r=>r.json()),
       fetch('/api/game_predictions'+q).then(r=>r.json()),
       fetch('/api/game_record'+q).then(r=>r.json()),
+      fetch('/api/model_form'+q).then(r=>r.json()),
     ]);
     if(my!==fetchToken||s!==season) return;   // user switched seasons mid-request
-    teamData=t; playerData=p; predData=pr; gamePredData=gp; gameRecData=gr;
+    teamData=t; playerData=p; predData=pr; gamePredData=gp; gameRecData=gr; formData=mf;
   }catch(e){ console.error('Fetch error:',e); }
 }
 
@@ -561,7 +582,7 @@ function renderLabels(){
 function renderAll(){
   renderLabels();
   renderOverview();
-  renderGamePredictions();
+  renderGamePredictions(); renderForm();
   renderSchedule();
   renderPlayers();
   renderPredictions();
@@ -660,6 +681,43 @@ function renderRecord(r){
   return head+`<div class="srow">${box(r.correct,'Correct','var(--win)')}${box(r.wrong,'Wrong','var(--loss)')}${box(r.pct+'%','Accuracy','var(--accent)')}</div>
     <div class="gp-recnote">Hornets wins called right: ${wc.correct}/${wc.total} · Hornets losses called right: ${lc.correct}/${lc.total}</div>
     ${rows}${bt}</div>`;
+}
+
+function renderForm(){
+  const el=$('ov-form'); if(!el) return;
+  const f=formData;
+  if(!f||f.error){ el.innerHTML='<div class="empty">Model form unavailable.</div>'; return; }
+  const lbl={hot:'🔥 HOT',cold:'🧊 COLD',steady:'➖ STEADY',none:'– NO READ YET'}[f.status]||'–';
+  setText('ov-form-badge',f.graded?`${f.graded} graded`:'No games yet');
+  let sub;
+  if(f.status==='none'){
+    sub=`Needs at least 3 graded games for a read (${f.graded} so far).`;
+  }else{
+    const sk=f.streak_kind==='W'?`<b>${f.streak}</b> correct in a row`:`<b>${f.streak}</b> missed in a row`;
+    sub=`${sk} · last 5: <b>${f.last5.correct}/${f.last5.total}</b> · last ${f.last10.total}: <b>${f.last10.correct}/${f.last10.total}</b>`;
+  }
+  const dots=(f.form||[]).map(x=>`<div class="fm-dot ${x.ok?'ok':'no'}" title="${x.home?'vs':'@'} ${esc(x.opp)} · ${esc(x.date)}">${x.ok?'✓':'✗'}</div>`).join('');
+  let bet='';
+  const b=f.best;
+  if(b){
+    const col={Strong:'var(--win)',Solid:'var(--accent)',Lean:'var(--gold)',Pass:'var(--mu)'}[b.tier];
+    const opp=esc(b.opponent);
+    const name=b.pick_is_cha?'Charlotte Hornets':opp;
+    const sim=b.similar&&b.similar.total>=2?` · model is ${b.similar.correct}/${b.similar.total} on picks this confident`:'';
+    const formNote=f.status==='hot'?' The model is running hot, so it has the benefit of the doubt.'
+                  :f.status==='cold'?' The model is running cold — size down or wait for it to recover.':'';
+    const head=b.tier==='Pass'
+      ? `<div class="bb-pick">No confident bet<span class="bb-tier" style="color:${col}">Pass</span></div>`
+      : `<div class="bb-pick">${esc(name)} to win<span class="bb-tier" style="color:${col}">${b.tier}</span></div>`;
+    bet=`<div class="seclbl" style="margin-top:2px">Best bet · ${b.home?'vs':'@'} ${opp} · ${fmtIso(b.game_date,true)}</div>
+      <div class="bb">${head}
+      <div class="bb-meta">Model confidence <b>${b.confidence}%</b> · predicted ${b.pred_pts}–${b.pred_opp_pts} · ${esc(b.pick_is_cha?'Hornets':opp)} win by 5+ about <b>${b.win_by_5}%</b>${sim}.${formNote}</div></div>
+      <div class="gp-recnote" style="margin-top:8px">Built from the model's own win probability, not sportsbook odds or lines. Check the real price: a pick is only a good bet if the odds pay more than ${b.confidence}% implies. Not financial advice.</div>`;
+  }else{
+    bet=`<div class="empty" style="padding:10px">${season!==currentSeason?'Season complete — no upcoming game.':'No upcoming game to pick yet.'}</div>`;
+  }
+  el.innerHTML=`<div class="fm-top"><div class="fm-badge fm-${f.status==='none'?'steady':f.status}">${lbl}</div><div class="fm-sub">${sub}</div></div>
+    ${dots?`<div class="fm-dots">${dots}</div>`:''}${bet}`;
 }
 
 function renderGamePredictions(){
