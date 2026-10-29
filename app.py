@@ -257,6 +257,80 @@ def api_model_form():
                     "last10": {"correct": sum(seq[-10:]), "total": len(seq[-10:])},
                     "form": form, "best": best})
 
+_LIVE_CACHE = {"ts": 0.0, "data": None}
+_LIVE_LOCK = threading.Lock()
+
+def _live_from_espn():
+    import requests
+    r = requests.get("https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard", timeout=6)
+    r.raise_for_status()
+    for e in r.json().get("events", []):
+        c = e["competitions"][0]
+        side = {x["homeAway"]: x for x in c["competitors"]}
+        h, a = side["home"], side["away"]
+        abbr = lambda x: x["team"]["abbreviation"]
+        if "CHA" not in (abbr(h), abbr(a)):
+            continue
+        st = c["status"]
+        state = st["type"]["state"]                      # pre | in | post
+        period, clock = st.get("period") or 0, st.get("displayClock") or ""
+        name = st["type"].get("name", "")
+        if state == "in":
+            if "HALFTIME" in name:
+                label = "Halftime"
+            elif "END_PERIOD" in name or clock in ("0.0", "0:00"):
+                label = st["type"].get("shortDetail") or "End of period"
+            else:
+                q = f"Q{period}" if period <= 4 else ("OT" if period == 5 else f"{period - 4}OT")
+                label = f"{q} {clock}"
+        elif state == "post":
+            label = "Final" + ("" if period <= 4 else ("/OT" if period == 5 else f"/{period - 4}OT"))
+        else:
+            label = "Scheduled"
+        num = lambda x: int(x["score"]) if str(x.get("score", "")).strip().isdigit() else None
+        return {"state": state, "label": label, "start": e.get("date"),
+                "home": {"abbr": abbr(h), "score": num(h)}, "away": {"abbr": abbr(a), "score": num(a)},
+                "cha_home": abbr(h) == "CHA", "source": "espn"}
+    return {"state": "none"}
+
+def _live_from_nba():
+    from nba_api.stats.endpoints import scoreboardv3
+    d = scoreboardv3.ScoreboardV3(game_date=date.today().isoformat(), timeout=10).get_dict()["scoreboard"]
+    for g in d["games"]:
+        h, a = g["homeTeam"], g["awayTeam"]
+        if "CHA" not in (h["teamTricode"], a["teamTricode"]):
+            continue
+        state = {1: "pre", 2: "in", 3: "post"}.get(g["gameStatus"], "pre")
+        label = (g.get("gameStatusText") or "").strip()
+        m = re.match(r"PT(\d+)M([\d.]+)S", g.get("gameClock") or "")
+        if state == "in" and m and g.get("period"):
+            p = g["period"]
+            q = f"Q{p}" if p <= 4 else ("OT" if p == 5 else f"{p - 4}OT")
+            label = f"{q} {int(m.group(1))}:{int(float(m.group(2))):02d}"
+        return {"state": state, "label": label, "start": g.get("gameTimeUTC"),
+                "home": {"abbr": h["teamTricode"], "score": h.get("score")},
+                "away": {"abbr": a["teamTricode"], "score": a.get("score")},
+                "cha_home": h["teamTricode"] == "CHA", "source": "nba"}
+    return {"state": "none"}
+
+@app.route("/api/live")
+def api_live():
+    """Today's Hornets game: live score and clock (cached 15s; ESPN first, NBA stats as a fallback)."""
+    with _LIVE_LOCK:
+        if _LIVE_CACHE["data"] is not None and time.time() - _LIVE_CACHE["ts"] < 15:
+            return jsonify(_LIVE_CACHE["data"])
+        data = None
+        for fn in (_live_from_espn, _live_from_nba):
+            try:
+                data = fn()
+                break
+            except Exception as ex:
+                logger.warning("live score via %s failed: %s", fn.__name__, ex)
+        if data is None:
+            data = {"state": "error"}
+        _LIVE_CACHE.update(ts=time.time(), data=data)
+        return jsonify(data)
+
 @app.route("/api/predictions")
 def api_predictions():
     season = _season_arg()

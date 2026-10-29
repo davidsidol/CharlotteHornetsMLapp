@@ -281,6 +281,21 @@ table.gt tr:hover td{background:rgba(0,120,140,.06)}
 .bb-tier{display:inline-block;font-size:10px;letter-spacing:2px;text-transform:uppercase;padding:2px 8px;border-radius:5px;margin-left:8px;vertical-align:middle;border:1px solid currentColor}
 .bb-meta{font-size:12px;color:var(--mu);line-height:1.6}
 .bb-meta b{color:var(--tx)}
+
+.banner{gap:18px}
+.blive{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:0;position:relative;z-index:1}
+.blive:empty{display:none}
+.bl-st{font-size:10px;letter-spacing:3px;text-transform:uppercase;color:var(--mu);display:flex;align-items:center;gap:7px;margin-bottom:5px}
+.bl-st.live{color:#ff4d4d}
+.bl-dot{width:7px;height:7px;border-radius:50%;background:#ff3b3b;box-shadow:0 0 8px #ff3b3b;animation:blink 1.4s ease-in-out infinite}
+.bl-row{display:flex;align-items:center;gap:14px;font-family:var(--fd);line-height:1}
+.bl-tm{font-size:15px;letter-spacing:2px;color:var(--mu)}
+.bl-sc{font-size:34px;color:#fff;min-width:44px;text-align:center}
+.bl-sc.lead{color:var(--accent)}
+.bl-dash{color:var(--mu);font-size:22px}
+.bl-sub{font-size:10px;letter-spacing:2px;color:var(--mu);text-transform:uppercase;margin-top:5px}
+.bl-res-w{color:var(--win)}.bl-res-l{color:var(--loss)}
+@media(max-width:900px){.banner{flex-wrap:wrap}.blive{order:3;flex-basis:100%;padding-top:6px}}
 </style>
 </head>
 <body>
@@ -332,6 +347,7 @@ table.gt tr:hover td{background:rgba(0,120,140,.06)}
       <div class="bnt">Charlotte Hornets</div>
       <div class="bns" id="ov-sub">NBA · Eastern Conference · Southeast Division</div>
     </div>
+    <div class="blive" id="ov-live"></div>
     <div class="bqs">
       <div class="bq"><div class="bqv" id="ov-w">–</div><div class="bql">Wins</div></div>
       <div class="bq"><div class="bqv" id="ov-l">–</div><div class="bql">Losses</div></div>
@@ -582,7 +598,7 @@ function renderLabels(){
 function renderAll(){
   renderLabels();
   renderOverview();
-  renderGamePredictions(); renderForm();
+  renderGamePredictions(); renderForm(); pollLive();
   renderSchedule();
   renderPlayers();
   renderPredictions();
@@ -719,6 +735,32 @@ function renderForm(){
   el.innerHTML=`<div class="fm-top"><div class="fm-badge fm-${f.status==='none'?'steady':f.status}">${lbl}</div><div class="fm-sub">${sub}</div></div>
     ${dots?`<div class="fm-dots">${dots}</div>`:''}${bet}`;
 }
+
+async function pollLive(){
+  const el=$('ov-live'); if(!el) return;
+  if(typeof season!=='undefined' && typeof currentSeason!=='undefined' && season!==currentSeason){ el.innerHTML=''; return; }
+  let d;
+  try{ d=await fetch('/api/live').then(r=>r.json()); }catch(e){ return; }
+  if(!d||d.state==='none'||d.state==='error'){
+    const g=(gamePredData||[])[0];
+    el.innerHTML=g?`<div class="bl-st">Next game</div><div class="bl-row"><span class="bl-tm" style="color:#fff">${g.home?'vs':'@'} ${esc(g.opponent)}</span></div><div class="bl-sub">${fmtIso(g.game_date,true)} · ${fmtTime(g.game_time)}</div>`:'';
+    return;
+  }
+  const a=d.away, h=d.home;
+  const as=a.score??'–', hs=h.score??'–';
+  const lead=(x,y)=>(x!=null&&y!=null&&x>y)?' lead':'';
+  const row=`<div class="bl-row"><span class="bl-tm">${esc(a.abbr)}</span><span class="bl-sc${lead(a.score,h.score)}">${as}</span><span class="bl-dash">–</span><span class="bl-sc${lead(h.score,a.score)}">${hs}</span><span class="bl-tm">${esc(h.abbr)}</span></div>`;
+  if(d.state==='in'){
+    el.innerHTML=`<div class="bl-st live"><span class="bl-dot"></span>Live · ${esc(d.label)}</div>${row}`;
+  }else if(d.state==='post'){
+    const cha=d.cha_home?h:a, opp=d.cha_home?a:h, won=(cha.score??0)>(opp.score??0);
+    el.innerHTML=`<div class="bl-st">${esc(d.label)} · <span class="${won?'bl-res-w':'bl-res-l'}">Hornets ${won?'win':'lose'}</span></div>${row}`;
+  }else{
+    const t=d.start?new Date(d.start).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}):'';
+    el.innerHTML=`<div class="bl-st">Today${t?' · '+t:''}</div><div class="bl-row"><span class="bl-tm" style="color:#fff">${esc(a.abbr)}</span><span class="bl-dash">@</span><span class="bl-tm" style="color:#fff">${esc(h.abbr)}</span></div>`;
+  }
+}
+window.addEventListener('load',()=>{ setTimeout(pollLive,800); setInterval(pollLive,20000); });
 
 function renderGamePredictions(){
   const el=$('ov-gp'); if(!el) return;
