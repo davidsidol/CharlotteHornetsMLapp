@@ -9,3 +9,6 @@ backups/
 out.txt
 err.txt
 !static/HornetsLogo_bg.png
+venv/
+logs/
+data/

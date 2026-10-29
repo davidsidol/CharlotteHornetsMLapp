@@ -12,7 +12,7 @@ import random
 from datetime import datetime
 
 from database import (query, save_predictions, clear_predictions, save_game_predictions,
-                      execute, execute_many, current_season)
+                      execute, execute_many, current_season, _insert_sql, GAME_PRED_COLS)
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +72,7 @@ def _history(player_id, season, window):
         seen = {r["game_id"] for r in rows}
         older = query(
             f"SELECT {cols} FROM (SELECT {cols} FROM prior_games WHERE player_id=? "
-            f"UNION SELECT {cols} FROM player_stats WHERE player_id=? AND season != ?) "
+            f"UNION SELECT {cols} FROM player_stats WHERE player_id=? AND season != ?) AS h "
             "ORDER BY game_date_iso DESC, game_id DESC LIMIT ?",
             (player_id, player_id, season, window))
         for r in older:
@@ -208,10 +208,7 @@ def backtest_team_predictions(season):
                      TEAM_MODEL_VERSION, datetime.utcnow().isoformat(),
                      g["pts"], g["opp_pts"], "W" if won else "L", correct, "backtest"))
     if rows:
-        execute_many("INSERT OR IGNORE INTO game_predictions (season, game_id, game_date, game_time, opponent, home, "
-                     "arena, pred_pts, pred_opp_pts, win_prob, winner, model_version, created_at, "
-                     "actual_pts, actual_opp_pts, result, correct, source) "
-                     "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+        execute_many(_insert_sql("game_predictions", GAME_PRED_COLS, "INSERT OR IGNORE"), rows)
     logger.info(f"Back-tested {len(rows)} finished games for {season}")
     return len(rows)
 

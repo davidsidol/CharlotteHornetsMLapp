@@ -3,3 +3,4 @@ waitress
 requests
 beautifulsoup4
 nba_api
+pyodbc

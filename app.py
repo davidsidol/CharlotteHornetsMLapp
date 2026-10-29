@@ -4,7 +4,7 @@ Charlotte Hornets Dashboard — Production App
 - Multi-season: every data endpoint accepts ?season=YYYY-YY (defaults to the current season)
 - Auto-refresh every 4 hours via background scheduler (current season only)
 - Server-Sent Events for live push to browser
-- MSSQL-ready (set USE_MSSQL=true + MSSQL_CONN_STR env vars)
+- SQLite by default; SQL Server with DB_BACKEND=mssql + MSSQL_SERVER / MSSQL_DATABASE (see database.py)
 """
 import logging
 import threading
@@ -21,12 +21,14 @@ from fetcher import refresh_all, PINNED_PLAYERS
 from ml_predictions import run_all_predictions, get_player_averages
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+LOG_DIR = os.environ.get("LOG_DIR", BASE_DIR)
+os.makedirs(LOG_DIR, exist_ok=True)
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(message)s",
     handlers=[
-        logging.FileHandler(os.path.join(BASE_DIR, "hornets.log"), mode='a'),
+        logging.FileHandler(os.path.join(LOG_DIR, "hornets.log"), mode='a', encoding='utf-8'),
         logging.StreamHandler()
     ]
 )
@@ -83,6 +85,15 @@ def _available_seasons():
     rows = query("SELECT DISTINCT season FROM team_games WHERE season IS NOT NULL "
                  "UNION SELECT DISTINCT season FROM schedule WHERE season IS NOT NULL")
     return sorted({r["season"] for r in rows} | {current_season()}, reverse=True)
+
+# A game that has not tipped off yet: later day, or today with a later (or unknown) tip time.
+# Written without string concatenation so it runs on SQLite and SQL Server alike.
+_NOT_TIPPED = "(game_date > ? OR (game_date = ? AND COALESCE(game_time, '00:00') > ?))"
+
+def _now_params():
+    now = datetime.now()                                  # server clock is Eastern, like the stored tip times
+    today = now.strftime("%Y-%m-%d")
+    return (today, today, now.strftime("%H:%M"))
 
 # ── routes ────────────────────────────────────────────────────────────────────
 @app.route("/")
@@ -172,11 +183,8 @@ def api_player(pid):
 def api_game_predictions():
     """Predicted score + winner for the Hornets' next games."""
     season = _season_arg()
-    today  = date.today().isoformat()
-    now = datetime.now().strftime("%Y-%m-%d %H:%M")      # server clock is Eastern, like the stored tip times
-    return jsonify(query("SELECT * FROM game_predictions WHERE season=? AND result IS NULL AND game_date >= ? "
-                         "AND (game_date || ' ' || COALESCE(game_time, '00:00')) > ? "
-                         "ORDER BY game_date ASC, game_id ASC", (season, today, now)))
+    return jsonify(query("SELECT * FROM game_predictions WHERE season=? AND result IS NULL AND " + _NOT_TIPPED +
+                         " ORDER BY game_date ASC, game_id ASC", (season,) + _now_params()))
 
 @app.route("/api/game_record")
 def api_game_record():
@@ -227,10 +235,8 @@ def api_model_form():
             for r in rows[-10:]]
 
     best = None
-    now = datetime.now().strftime("%Y-%m-%d %H:%M")
-    nxt = query("SELECT * FROM game_predictions WHERE season=? AND result IS NULL AND game_date >= ? "
-                "AND (game_date || ' ' || COALESCE(game_time, '00:00')) > ? "
-                "ORDER BY game_date ASC, game_id ASC LIMIT 1", (season, date.today().isoformat(), now))
+    nxt = query("SELECT * FROM game_predictions WHERE season=? AND result IS NULL AND " + _NOT_TIPPED +
+                " ORDER BY game_date ASC, game_id ASC LIMIT 1", (season,) + _now_params())
     if nxt:
         g = nxt[0]
         pw = float(g["win_prob"])

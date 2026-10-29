@@ -19,7 +19,7 @@ A real-time NBA analytics dashboard for the Charlotte Hornets, featuring live st
 |-------|-----------|
 | Backend | Python 3.9+ / Flask |
 | WSGI Server | Waitress (Windows-compatible) |
-| Database | SQLite (MSSQL-ready via env vars) |
+| Database | SQLite or SQL Server (via env vars) |
 | Data Source | `nba_api` — official NBA stats endpoints |
 | ML Model | Exponentially weighted rolling averages |
 | Frontend | Vanilla JS + CSS (no framework) |
@@ -84,13 +84,24 @@ CharlotteHornetsMLapp/
 | `/api/refresh` | POST | Trigger manual data refresh |
 | `/api/stream` | GET | SSE live update stream |
 
-## MSSQL Support
+## SQL Server (Windows authentication)
 
-To swap SQLite for Microsoft SQL Server, set these environment variables before starting:
+SQLite is the default. To use SQL Server instead, set these environment variables (there is no fallback to SQLite):
 
-```bash
-set USE_MSSQL=true
-set MSSQL_CONN_STR=DRIVER={ODBC Driver 18 for SQL Server};SERVER=localhost;DATABASE=HornetsDB;Trusted_Connection=yes;
+| Variable | Example | |
+|----------|---------|---|
+| `DB_BACKEND` | `mssql` | `sqlite` (default) or `mssql` |
+| `MSSQL_SERVER` | `IDOLAPP01\IDOLMSSQL` | instance or AG listener |
+| `MSSQL_DATABASE` | `HornetsDB` | |
+| `MSSQL_DRIVER` | `ODBC Driver 18 for SQL Server` | default shown |
+| `PORT` / `LOG_DIR` | `8080` / `C:\Apps\CharlotteHornets\logs` | |
+
+The process identity is the SQL login, so give the service account `db_datareader`, `db_datawriter` and `db_ddladmin`
+on the database (the app creates its own tables). Copy an existing SQLite database across once with
+`python migrate_sqlite_to_mssql.py hornets.db`, then install the service from an elevated PowerShell:
+```powershell
+python -m venv venv; .\venv\Scripts\pip install -r requirements.txt
+powershell -ExecutionPolicy Bypass -File .\install_service.ps1     # asks for the service account password
 ```
 
 ## Tracked Players
