@@ -1,26 +1,69 @@
 """
-ML prediction engine — no scikit-learn required.
-Uses exponentially weighted rolling averages to forecast PTS, REB, AST for the
-Hornets' next scheduled games. Compatible with Python 3.14+.
+ML prediction engine — no scikit-learn required (pure Python, 3.14+).
 
-The 8-game window follows a player across seasons, so returning players are
-forecast from their latest games even in the first weeks of a new season.
+Team model ("team_v2")
+  Every team gets an offensive rating (points scored) and a defensive rating (points allowed), built game by game
+  with exponential recency decay and a discounted carry-over from last season. A matchup's predicted score =
+  league average + shrink * (offense edge + opponent defense edge) +/- home edge +/- a rest adjustment (days since
+  each team's last game, and a back-to-back penalty); the win probability comes from a normal distribution of the
+  margin. The parameters are LEARNED: a grid search walks every league game since the second stored season in date
+  order (each game predicted only from games before it) and keeps the setting with the lowest log-loss. The
+  old fixed setting is inside the grid, so the new one is only used to the extent it predicts past games better.
+  A season is always predicted with parameters learned on earlier seasons only.
+
+Player model ("player_v2")
+  Points / rebounds / assists = forecast minutes x per-minute rate x opponent adjustment.
+  Minutes and each stat's per-minute rate are recency-weighted over the player's last games (any team, any season,
+  from the league-wide game logs). The adjustment scales for how many points the opponent allows and how fast the
+  game is expected to be (opponent pace). The recency decays and the adjustment strengths are learned from past
+  games and scored by mean absolute error per stat against the old model (plain 8-game weighted average).
+  Players with no league-wide history yet fall back to that old average ("rolling_v2"), without random noise.
 """
+import json
 import logging
 import math
-import random
-from datetime import datetime
+from collections import defaultdict
+from datetime import datetime, date
+from itertools import product
+from statistics import NormalDist
 
 from database import (query, save_predictions, clear_predictions, save_game_predictions,
-                      execute, execute_many, current_season, _insert_sql, GAME_PRED_COLS)
+                      execute, execute_many, current_season, set_param, get_param, _insert_sql, GAME_PRED_COLS)
 
 logger = logging.getLogger(__name__)
 
-MODEL_VERSION = "rolling_v2"
-WINDOW = 8          # games in the rolling window
-MIN_GAMES = 3       # no forecast for players with fewer games than this on record
-N_FORECAST = 5      # upcoming games to forecast
 HORNETS_ABBR = "CHA"
+TEAM_MODEL_VERSION = "team_v2"
+PLAYER_MODEL_VERSION = "player_v2"
+LEGACY_PLAYER_VERSION = "rolling_v2"
+N_FORECAST = 5          # upcoming games to forecast per player
+N_TEAM_FORECAST = 5
+WINDOW = 10             # player games in the rolling window
+LEGACY_WINDOW = 8
+MIN_GAMES = 3           # no forecast for players with fewer games than this on record
+MIN_MPG = 12            # tune the player model on players averaging at least this many minutes
+STATS = ("pts", "reb", "ast")
+
+# The fixed settings used before the model learned its own (team_v1): the baseline every tuned model must beat.
+DEFAULT_TEAM_PARAMS = {"w_prior": 0.4, "decay": 1.0, "shrink": 0.75, "hfa": 1.4,
+                       "k_rest": 0.0, "k_b2b": 0.0, "sd": 12.0}
+MARGIN_SD = DEFAULT_TEAM_PARAMS["sd"]        # fallback when a season has no learned parameters yet
+DEFAULT_PLAYER_PARAMS = {"decay_min": 0.85, "decay": {s: 0.85 for s in STATS}, "w_def": 0.5,
+                         "w_pace": {s: 0.5 for s in STATS}}
+_ND = NormalDist()
+_ORD = {}
+
+def _ord(day):
+    if day not in _ORD:
+        _ORD[day] = date.fromisoformat(str(day)[:10]).toordinal()
+    return _ORD[day]
+
+def _season_start(season):
+    return int(str(season)[:4])
+
+def _prev_season(season):
+    y = _season_start(season) - 1
+    return f"{y}-{str(y + 1)[-2:]}"
 
 def weighted_avg(values, decay=0.85):
     """values must be in chronological order (oldest first); the newest game weighs most."""
@@ -56,157 +99,242 @@ def upcoming_games(season, limit=N_FORECAST):
     games = []
     for r in rows:
         if r["home_team"] == HORNETS_ABBR:
-            games.append({"date": r["game_date"], "opponent": f"vs {r['away_team']}"})
+            games.append({"date": r["game_date"], "opponent": f"vs {r['away_team']}", "opp": r["away_team"]})
         else:
-            games.append({"date": r["game_date"], "opponent": f"@ {r['home_team']}"})
+            games.append({"date": r["game_date"], "opponent": f"@ {r['home_team']}", "opp": r["home_team"]})
     return games
 
-def _history(player_id, season, window):
-    """Newest-first game rows: this season's games first, topped up from earlier games
-    (previous season on any team) until the window is full. Returns (rows, n_current)."""
-    cols = "game_id, game_date_iso, pts, reb, ast"
-    rows = query(f"SELECT {cols} FROM player_stats WHERE player_id=? AND season=? "
-                 "ORDER BY game_date_iso DESC, game_id DESC LIMIT ?", (player_id, season, window))
-    n_cur = len(rows)
-    if n_cur < window:
-        seen = {r["game_id"] for r in rows}
-        older = query(
-            f"SELECT {cols} FROM (SELECT {cols} FROM prior_games WHERE player_id=? "
-            f"UNION SELECT {cols} FROM player_stats WHERE player_id=? AND season != ?) AS h "
-            "ORDER BY game_date_iso DESC, game_id DESC LIMIT ?",
-            (player_id, player_id, season, window))
-        for r in older:
-            if r["game_id"] not in seen and len(rows) < window:
-                rows.append(r); seen.add(r["game_id"])
-    return rows, n_cur
-
-def predict_for_player(player_id, player_name, future_games, window=WINDOW, season=None):
-    season = season or current_season()
-    games, n_cur = _history(player_id, season, window)
-    if len(games) < MIN_GAMES: return []
-    games = list(reversed(games))          # oldest -> newest, so recent games weigh more
-
-    pts_vals = [g["pts"] for g in games]
-    reb_vals = [g["reb"] for g in games]
-    ast_vals = [g["ast"] for g in games]
-
-    pts_pred = weighted_avg(pts_vals)
-    reb_pred = weighted_avg(reb_vals)
-    ast_pred = weighted_avg(ast_vals)
-
-    pts_std = std(pts_vals)
-    confidence = 1.0 - (pts_std / (pts_pred + 1))
-    # Games from this season count fully; carried-over games from last season count half.
-    sample = n_cur + 0.5 * (len(games) - n_cur)
-    confidence *= min(1.0, sample / float(window))
-    confidence = max(0.10, min(0.85, confidence))
-
-    return [(
-        player_id, player_name, fg["date"], fg["opponent"],
-        round(max(0.0, pts_pred + random.uniform(-2, 2)), 1),
-        round(max(0.0, reb_pred + random.uniform(-1, 1)), 1),
-        round(max(0.0, ast_pred + random.uniform(-1, 1)), 1),
-        round(confidence, 3), MODEL_VERSION, datetime.utcnow().isoformat()
-    ) for fg in future_games]
-
-# ── Team game predictions (score + winner) ───────────────────────────────────
-TEAM_MODEL_VERSION = "team_v1"
-N_TEAM_FORECAST = 5
-PRIOR_SEASON_WEIGHT = 0.4    # a last-season game counts 0.4 of a this-season game
-HOME_EDGE = 1.4              # points added to the home team, removed from the visitor (~2.8 pt swing)
-MARGIN_SD = 12.0             # typical NBA single-game margin spread, for win probability
-SHRINK = 0.75                # pull team ratings toward the league average (rosters change every summer)
-
-def _prev_season(season):
-    y = int(str(season)[:4]) - 1
-    return f"{y}-{str(y + 1)[-2:]}"
-
-def team_ratings(season, before=None):
-    """Per-team points scored / allowed per game, blending this season with a discounted last season.
-    `before` (ISO date) limits this season's games to those played before that date (for back-tests)."""
-    if before:
-        rows = query("SELECT team_abbr, pts, opp_pts, season FROM league_games "
-                     "WHERE (season=? AND game_date_iso < ?) OR season=?",
-                     (season, before, _prev_season(season)))
-    else:
-        rows = query("SELECT team_abbr, pts, opp_pts, season FROM league_games WHERE season IN (?, ?)",
-                     (season, _prev_season(season)))
-    agg, tot_w, tot_pts = {}, 0.0, 0.0
+# ══════════════════════════════════════════════════════════════════════════════
+#  TEAM MODEL
+# ══════════════════════════════════════════════════════════════════════════════
+def _games():
+    """Every finished league game, oldest first: {season, game_id, date, home_team, away_team, hs, as_}."""
+    rows = query("SELECT season, game_id, team_abbr, game_date_iso, pts, opp_pts, home FROM league_games "
+                 "WHERE game_date_iso IS NOT NULL ORDER BY game_date_iso, game_id")
+    by = {}
     for r in rows:
-        w = 1.0 if r["season"] == season else PRIOR_SEASON_WEIGHT
-        a = agg.setdefault(r["team_abbr"], [0.0, 0.0, 0.0])
-        a[0] += w; a[1] += w * r["pts"]; a[2] += w * r["opp_pts"]
-        tot_w += w; tot_pts += w * r["pts"]
-    if not tot_w:
-        return {}, 0.0
-    return ({t: {"off": a[1] / a[0], "def": a[2] / a[0]} for t, a in agg.items()}, tot_pts / tot_w)
+        g = by.setdefault((r["season"], r["game_id"]),
+                          {"season": r["season"], "game_id": r["game_id"], "date": r["game_date_iso"]})
+        if r["home"]:
+            g["home_team"], g["hs"] = r["team_abbr"], r["pts"]
+        else:
+            g["away_team"], g["as_"] = r["team_abbr"], r["pts"]
+    games = [g for g in by.values() if "home_team" in g and "away_team" in g]
+    games.sort(key=lambda g: (g["date"], g["game_id"]))
+    return games
 
-def predict_matchup(ratings, league_avg, home, opp):
-    """Predicted (hornets_pts, opp_pts, hornets_win_prob) or None when a team has no ratings yet."""
-    if HORNETS_ABBR not in ratings or opp not in ratings:
-        return None
-    c, o = ratings[HORNETS_ABBR], ratings[opp]
-    cha = league_avg + SHRINK * ((c["off"] - league_avg) + (o["def"] - league_avg)) + (HOME_EDGE if home else -HOME_EDGE)
-    oth = league_avg + SHRINK * ((o["off"] - league_avg) + (c["def"] - league_avg)) + (-HOME_EDGE if home else HOME_EDGE)
-    margin = cha - oth
-    p_win = 0.5 * (1.0 + math.erf(margin / (MARGIN_SD * math.sqrt(2.0))))
-    a, b = int(round(cha)), int(round(oth))
-    if a == b:                                   # never predict a tie
-        if margin >= 0: a += 1
+class _Ratings:
+    def __init__(self, p):
+        self.p = p
+        self.off, self.dfn, self.w = defaultdict(float), defaultdict(float), defaultdict(float)
+        self.lg_s = self.lg_w = 0.0
+        self.season = None
+        self.last = {}                    # team -> ordinal day of its last game
+
+    def new_season(self, season):
+        if self.season is not None:
+            k = self.p["w_prior"]
+            for t in list(self.w):
+                self.off[t] *= k; self.dfn[t] *= k; self.w[t] *= k
+            self.lg_s *= k; self.lg_w *= k
+        self.season = season
+
+    def rest(self, team, day):
+        """Days since the team's last game, 1 = back-to-back, capped at 4 (also after the off-season)."""
+        last = self.last.get(team)
+        return 4 if last is None else min(4, max(1, day - last))
+
+    def predict(self, home, away, day):
+        """(home_pts, away_pts, home margin) or None while a team has no games on record."""
+        if not self.w[home] or not self.w[away]:
+            return None
+        p = self.p
+        lg = self.lg_s / self.lg_w
+        oh, dh = self.off[home] / self.w[home], self.dfn[home] / self.w[home]
+        oa, da = self.off[away] / self.w[away], self.dfn[away] / self.w[away]
+        rh, ra = self.rest(home, day), self.rest(away, day)
+        adj = p["k_rest"] * (rh - ra) + p["k_b2b"] * ((ra == 1) - (rh == 1))
+        hp = lg + p["shrink"] * ((oh - lg) + (da - lg)) + p["hfa"] + adj / 2
+        ap = lg + p["shrink"] * ((oa - lg) + (dh - lg)) - p["hfa"] - adj / 2
+        return hp, ap, hp - ap
+
+    def update(self, home, away, hs, as_, day):
+        d = self.p["decay"]
+        for t, pf, pa in ((home, hs, as_), (away, as_, hs)):
+            self.off[t] = self.off[t] * d + pf
+            self.dfn[t] = self.dfn[t] * d + pa
+            self.w[t] = self.w[t] * d + 1.0
+            self.last[t] = day
+        self.lg_s += hs + as_; self.lg_w += 2.0
+
+    def env(self, team):
+        """(defense ratio, pace ratio): points the team allows, and points in its games, vs the league (1.0 = average)."""
+        if not self.w[team] or not self.lg_w:
+            return 1.0, 1.0
+        lg = self.lg_s / self.lg_w
+        return (self.dfn[team] / self.w[team]) / lg, ((self.off[team] + self.dfn[team]) / self.w[team]) / (2 * lg)
+
+def walk(params, games, stop_before_season=None, want_env=False):
+    """Replay games in date order. Returns ({game_id: (home_pts, away_pts, margin)} for every played game, predicted
+    only from games before its date), the ratings after the last game, and (want_env) {date: {team: env}} as it
+    stood at the start of each game day."""
+    r = _Ratings(params)
+    out, env = {}, {}
+    i, n = 0, len(games)
+    while i < n:
+        day = games[i]["date"]
+        j = i
+        while j < n and games[j]["date"] == day:
+            j += 1
+        batch = games[i:j]
+        if stop_before_season and any(_season_start(g["season"]) >= _season_start(stop_before_season) for g in batch):
+            break
+        for g in batch:
+            if g["season"] != r.season:
+                r.new_season(g["season"])
+        d = _ord(day)
+        if want_env:
+            env[day] = {t: r.env(t) for t in list(r.w)}
+        for g in batch:
+            m = r.predict(g["home_team"], g["away_team"], d)
+            if m:
+                out[g["game_id"]] = m
+        for g in batch:
+            r.update(g["home_team"], g["away_team"], g["hs"], g["as_"], d)
+        i = j
+    return out, r, env
+
+def _logloss(rows, sd):
+    ll = 0.0
+    for margin, actual in rows:
+        p = min(max(_ND.cdf(margin / sd), 1e-4), 1 - 1e-4)
+        ll -= math.log(p if actual > 0 else 1 - p)
+    return ll / len(rows)
+
+def _accuracy(rows):
+    return sum(1 for m, a in rows if (m > 0) == (a > 0)) / len(rows)
+
+def _season_rows(preds, games, season):
+    return [(preds[g["game_id"]][2], g["hs"] - g["as_"]) for g in games
+            if g["season"] == season and g["game_id"] in preds and g["hs"] != g["as_"]]
+
+def tune_team_model(target_season, games):
+    """Learn the team-model parameters for `target_season` from every season before it (the first stored season is
+    only warm-up). Returns (params, metrics); the old fixed setting is returned when there is too little history."""
+    seasons = sorted({g["season"] for g in games})
+    tune_seasons = [s for s in seasons[1:] if _season_start(s) < _season_start(target_season)]
+    eval_games = [g for g in games if g["season"] in tune_seasons and g["hs"] != g["as_"]]
+    if len(eval_games) < 300:
+        return dict(DEFAULT_TEAM_PARAMS), {}
+    def score(p):
+        preds, _, _ = walk(p, games, stop_before_season=target_season)
+        return [(preds[g["game_id"]][2], g["hs"] - g["as_"]) for g in eval_games if g["game_id"] in preds]
+    def best_sd(rows):
+        return min((_logloss(rows, sd), sd) for sd in (10.5, 11.25, 12.0, 12.75, 13.5, 15.0, 16.5))
+    base = dict(DEFAULT_TEAM_PARAMS)
+    base_rows = score(base)
+    base_ll = _logloss(base_rows, base["sd"])
+    # Stage 1: the rating itself.
+    best = None
+    for w_prior, decay, shrink, hfa in product([0.2, 0.4, 0.6], [0.94, 0.96, 0.98, 1.0],
+                                               [0.5, 0.65, 0.8, 0.95], [1.0, 1.4, 1.8]):
+        p = dict(base, w_prior=w_prior, decay=decay, shrink=shrink, hfa=hfa)
+        rows = score(p)
+        ll, sd = best_sd(rows)
+        if best is None or ll < best[0]:
+            best = (ll, dict(p, sd=sd), rows)
+    # Stage 2: rest days and back-to-backs (zero stays possible).
+    stage1 = best
+    for k_rest, k_b2b in product([0.0, 0.1, 0.2, 0.3], [0.0, 0.75, 1.5, 2.25]):
+        p = dict(stage1[1], k_rest=k_rest, k_b2b=k_b2b)
+        rows = score(p)
+        ll, sd = best_sd(rows)
+        if ll < best[0]:
+            best = (ll, dict(p, sd=sd), rows)
+    ll, params, rows = best
+    metrics = {"seasons": tune_seasons, "games": len(rows),
+               "accuracy": round(100 * _accuracy(rows), 1), "log_loss": round(ll, 4),
+               "baseline_accuracy": round(100 * _accuracy(base_rows), 1), "baseline_log_loss": round(base_ll, 4),
+               "no_rest_log_loss": round(stage1[0], 4)}
+    # Honest check: both settings on the target season's games played so far (not used for learning).
+    new_preds, _, _ = walk(params, games)
+    old_preds, _, _ = walk(base, games)
+    new_rows, old_rows = _season_rows(new_preds, games, target_season), _season_rows(old_preds, games, target_season)
+    if len(new_rows) >= 20:
+        metrics["out_of_sample"] = {"season": target_season, "games": len(new_rows),
+                                    "accuracy": round(100 * _accuracy(new_rows), 1),
+                                    "log_loss": round(_logloss(new_rows, params["sd"]), 4),
+                                    "baseline_accuracy": round(100 * _accuracy(old_rows), 1),
+                                    "baseline_log_loss": round(_logloss(old_rows, base["sd"]), 4)}
+    logger.info(f"Team model for {target_season}: {params} -> {metrics}")
+    return params, metrics
+
+def team_params(season):
+    raw = get_param(f"team_params_{season}")
+    return json.loads(raw) if raw else dict(DEFAULT_TEAM_PARAMS)
+
+def margin_sd(season):
+    """Spread of single-game margins the season's model uses to turn a margin into a win probability."""
+    try:
+        return float(team_params(season).get("sd", MARGIN_SD))
+    except Exception:
+        return MARGIN_SD
+
+def _pick(hp, ap, margin, sd, cha_home):
+    """Hornets-perspective (cha_pts, opp_pts, cha_win_prob) with no predicted ties."""
+    cha, opp = (hp, ap) if cha_home else (ap, hp)
+    m = margin if cha_home else -margin
+    p_win = _ND.cdf(m / sd)
+    a, b = int(round(cha)), int(round(opp))
+    if a == b:
+        if m >= 0: a += 1
         else: b += 1
     return a, b, p_win
 
-def run_team_predictions(season):
+def run_team_predictions(season, ratings, params):
     today = datetime.now().strftime("%Y-%m-%d")
     games = query(
         "SELECT game_id, game_date, game_time, home_team, away_team, arena FROM schedule "
         "WHERE season=? AND status='Scheduled' AND game_date >= ? ORDER BY game_date ASC, game_id ASC LIMIT ?",
         (season, today, N_TEAM_FORECAST))
-    ratings, league_avg = team_ratings(season)
+    if ratings.season != season:
+        ratings.new_season(season)
     out = []
     for g in games:
         home = g["home_team"] == HORNETS_ABBR
         opp = g["away_team"] if home else g["home_team"]
-        m = predict_matchup(ratings, league_avg, home, opp)
+        day = _ord(g["game_date"])
+        m = ratings.predict(g["home_team"], g["away_team"], day)
+        ratings.last[HORNETS_ABBR] = day          # so the next forecast game sees the right rest
         if not m:
             continue
-        a, b, p_win = m
+        a, b, p_win = _pick(*m, params["sd"], home)
         out.append((g["game_id"], g["game_date"], g["game_time"], opp, 1 if home else 0, g["arena"] or "",
                     a, b, round(p_win, 3), HORNETS_ABBR if a > b else opp,
                     TEAM_MODEL_VERSION, datetime.utcnow().isoformat()))
     save_game_predictions(season, out)
     logger.info(f"Team game predictions saved: {len(out)}")
 
-def backtest_team_predictions(season):
+def backtest_team_predictions(season, games, preds, params):
     """Predict every finished Hornets game that has no stored prediction, using ONLY games played before it
-    (plus last season). Stored with source='backtest' so they are always labelled as such."""
+    (plus earlier seasons). Stored with source='backtest' so they are always labelled as such."""
     done = {r["game_id"] for r in query("SELECT game_id FROM game_predictions WHERE season=?", (season,))}
-    games = query("SELECT game_id, game_date_iso, pts, opp_pts, home FROM league_games "
-                  "WHERE season=? AND team_abbr=? ORDER BY game_date_iso, game_id", (season, HORNETS_ABBR))
-    todo = [g for g in games if g["game_id"] not in done]
-    if not todo:
-        return 0
-    cache, rows = {}, []
-    for g in todo:
-        d = g["game_date_iso"]
-        if d not in cache:
-            cache[d] = team_ratings(season, d)
-        ratings, league_avg = cache[d]
-        opp_row = query("SELECT team_abbr FROM league_games WHERE season=? AND game_id=? AND team_abbr != ?",
-                        (season, g["game_id"], HORNETS_ABBR))
-        if not opp_row:
+    rows = []
+    for g in games:
+        if g["season"] != season or HORNETS_ABBR not in (g["home_team"], g["away_team"]):
             continue
-        opp = opp_row[0]["team_abbr"]
-        m = predict_matchup(ratings, league_avg, bool(g["home"]), opp)
-        if not m:
+        if g["game_id"] in done or g["game_id"] not in preds:
             continue
-        a, b, p_win = m
+        home = g["home_team"] == HORNETS_ABBR
+        opp = g["away_team"] if home else g["home_team"]
+        us, them = (g["hs"], g["as_"]) if home else (g["as_"], g["hs"])
+        a, b, p_win = _pick(*preds[g["game_id"]], params["sd"], home)
         winner = HORNETS_ABBR if a > b else opp
-        won = g["pts"] > g["opp_pts"]
+        won = us > them
         correct = 1 if (winner == HORNETS_ABBR) == won else 0
-        rows.append((season, g["game_id"], d, None, opp, g["home"], "", a, b, round(p_win, 3), winner,
+        rows.append((season, g["game_id"], g["date"], None, opp, 1 if home else 0, "", a, b, round(p_win, 3), winner,
                      TEAM_MODEL_VERSION, datetime.utcnow().isoformat(),
-                     g["pts"], g["opp_pts"], "W" if won else "L", correct, "backtest"))
+                     us, them, "W" if won else "L", correct, "backtest"))
     if rows:
         execute_many(_insert_sql("game_predictions", GAME_PRED_COLS, "INSERT OR IGNORE"), rows)
     logger.info(f"Back-tested {len(rows)} finished games for {season}")
@@ -229,27 +357,191 @@ def grade_team_predictions(season):
         graded += 1
     logger.info(f"Graded {graded} team predictions for {season}")
 
-def run_all_predictions(season=None):
-    season = season or current_season()
-    logger.info(f"Running predictions for {season}...")
-    try:
-        run_team_predictions(season)
-        backtest_team_predictions(season)          # games played before tracking began
-        grade_team_predictions(season)             # results for predictions made before tip-off
-        prev = _prev_season(season)
-        if not query("SELECT 1 AS x FROM game_predictions WHERE season=? LIMIT 1", (prev,)):
-            backtest_team_predictions(prev)        # one-time record for the completed season
-    except Exception as e:
-        logger.error(f"Team prediction error: {e}")
+def run_team_model(season, games):
+    if not games:
+        return
+    prior = _prev_season(season)
+    for s in (prior, season):
+        raw = get_param(f"team_params_{s}")
+        if not raw or s == season or "k_rest" not in json.loads(raw):      # (re-)learn after a model upgrade
+            params, metrics = tune_team_model(s, games)
+            set_param(f"team_params_{s}", json.dumps(params))
+            set_param(f"team_metrics_{s}", json.dumps(metrics))
+    # Back-tests made by an older model version are redone with the current one.
+    execute("DELETE FROM game_predictions WHERE source='backtest' AND model_version<>?", (TEAM_MODEL_VERSION,))
+    # Last season: one-time back-test of every game with last season's learned parameters.
+    if not query("SELECT 1 AS x FROM game_predictions WHERE season=? LIMIT 1", (prior,)):
+        p = team_params(prior)
+        preds, _, _ = walk(p, games)
+        backtest_team_predictions(prior, games, preds, p)
+    p = team_params(season)
+    preds, ratings, _ = walk(p, games)
+    run_team_predictions(season, ratings, p)
+    grade_team_predictions(season)                 # results for predictions locked in before tip-off
+    backtest_team_predictions(season, games, preds, p)   # games played before tracking began
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  PLAYER MODEL
+# ══════════════════════════════════════════════════════════════════════════════
+def _player_logs():
+    """{player_id: [game rows, oldest first]} from the league-wide game logs (all teams, all stored seasons)."""
+    logs = defaultdict(list)
+    for r in query("SELECT player_id, player_name, season, game_id, opp_abbr, game_date_iso, min, pts, reb, ast "
+                   "FROM league_player_games ORDER BY game_date_iso, game_id"):
+        if r["min"] and r["min"] > 0:
+            logs[r["player_id"]].append(r)
+    return logs
+
+def _base_stat(hist, stat, decay_min, decay):
+    """Forecast minutes x per-minute rate for one stat from the player's previous games (oldest first)."""
+    n = len(hist)
+    minutes = weighted_avg([h["min"] for h in hist], decay_min)
+    num = den = 0.0
+    for k, h in enumerate(hist):
+        w = decay ** (n - 1 - k)
+        num += w * h[stat]
+        den += w * h["min"]
+    return minutes * num / den if den else 0.0
+
+def _env_factor(stat, env, p):
+    dr, pr = env
+    f = 1.0 + p["w_pace"][stat] * (pr - 1.0)
+    if stat == "pts":
+        f += p["w_def"] * (dr - 1.0)
+    return min(1.25, max(0.8, f))
+
+def _legacy_stat(hist, stat):
+    return weighted_avg([h[stat] for h in hist[-LEGACY_WINDOW:]], 0.85)
+
+def _mean(xs):
+    return sum(xs) / len(xs)
+
+def tune_player_model(target_season, logs, env):
+    """Learn the recency decays and the opponent-adjustment strengths from games before `target_season`, scored by
+    mean absolute error per stat against the old plain-average model. Each forecast uses only earlier games."""
+    tune, oos = [], []
+    for games in logs.values():
+        for i in range(MIN_GAMES, len(games)):
+            g = games[i]
+            hist = games[max(0, i - WINDOW):i]
+            if _mean([h["min"] for h in hist]) < MIN_MPG:
+                continue
+            case = (hist, g, env.get(g["game_date_iso"], {}).get(g["opp_abbr"], (1.0, 1.0)))
+            if _season_start(g["season"]) < _season_start(target_season):
+                tune.append(case)
+            elif g["season"] == target_season:
+                oos.append(case)
+    if len(tune) < 500:
+        return json.loads(json.dumps(DEFAULT_PLAYER_PARAMS)), {}
+    sub = tune[::max(1, len(tune) // 6000)]
+    base_mae = {s: _mean([abs(_legacy_stat(h, s) - g[s]) for h, g, _ in sub]) for s in STATS}
+    # Stage 1: how fast to forget, for minutes and for each stat's rate.
+    best = None
+    for dm in (0.7, 0.85, 1.0):
+        chosen, total = {}, 0.0
+        for s in STATS:
+            sbest = min((_mean([abs(_base_stat(h, s, dm, d) - g[s]) for h, g, _ in sub]), d)
+                        for d in (0.7, 0.8, 0.9, 1.0))
+            chosen[s] = sbest[1]
+            total += sbest[0] / base_mae[s]
+        if best is None or total < best[0]:
+            best = (total, dm, chosen)
+    _, dm, decay = best
+    base = {s: [_base_stat(h, s, dm, decay[s]) for h, _, _ in sub] for s in STATS}
+    # Stage 2: how much the opponent's defense and the game's pace move the forecast.
+    grid = (0.0, 0.5, 1.0, 1.5, 2.0)
+    params = {"decay_min": dm, "decay": decay, "w_def": 0.0, "w_pace": {s: 0.0 for s in STATS}}
+    def err(s, p):
+        return _mean([abs(b * _env_factor(s, e, p) - g[s]) for b, (_, g, e) in zip(base[s], sub)])
+    for s in ("reb", "ast"):
+        params["w_pace"][s] = min((err(s, dict(params, w_pace=dict(params["w_pace"], **{s: w}))), w) for w in grid)[1]
+    _, w_def, w_pace = min((err("pts", dict(params, w_def=wd, w_pace=dict(params["w_pace"], pts=wp))), wd, wp)
+                           for wd, wp in product(grid, grid))
+    params["w_def"], params["w_pace"]["pts"] = w_def, w_pace
+    def mae_of(cases, fn):
+        return {s: round(_mean([abs(fn(h, s, e) - g[s]) for h, g, e in cases]), 2) for s in STATS}
+    new_fn = lambda h, s, e: _base_stat(h, s, params["decay_min"], params["decay"][s]) * _env_factor(s, e, params)
+    old_fn = lambda h, s, e: _legacy_stat(h, s)
+    metrics = {"cases": len(sub), "mae": mae_of(sub, new_fn), "baseline_mae": mae_of(sub, old_fn)}
+    if len(oos) >= 100:
+        step = max(1, len(oos) // 4000)
+        metrics["out_of_sample"] = {"season": target_season, "cases": len(oos[::step]),
+                                    "mae": mae_of(oos[::step], new_fn), "baseline_mae": mae_of(oos[::step], old_fn)}
+    logger.info(f"Player model for {target_season}: {params} -> {metrics}")
+    return params, metrics
+
+def player_params():
+    raw = get_param("player_params")
+    return json.loads(raw) if raw else json.loads(json.dumps(DEFAULT_PLAYER_PARAMS))
+
+def _confidence(pts_vals, pts_pred, n_cur, n):
+    c = 1.0 - (std(pts_vals) / (pts_pred + 1))
+    # Games from this season count fully; carried-over games from earlier seasons count half.
+    sample = n_cur + 0.5 * (n - n_cur)
+    c *= min(1.0, sample / float(WINDOW))
+    return round(max(0.10, min(0.85, c)), 3)
+
+def _history(player_id, season, window):
+    """Newest-first game rows: this season's games first, topped up from earlier games
+    (previous season on any team) until the window is full. Returns (rows, n_current)."""
+    cols = "game_id, game_date_iso, pts, reb, ast"
+    rows = query(f"SELECT {cols} FROM player_stats WHERE player_id=? AND season=? "
+                 "ORDER BY game_date_iso DESC, game_id DESC LIMIT ?", (player_id, season, window))
+    n_cur = len(rows)
+    if n_cur < window:
+        seen = {r["game_id"] for r in rows}
+        older = query(
+            f"SELECT {cols} FROM (SELECT {cols} FROM prior_games WHERE player_id=? "
+            f"UNION SELECT {cols} FROM player_stats WHERE player_id=? AND season != ?) AS h "
+            "ORDER BY game_date_iso DESC, game_id DESC LIMIT ?",
+            (player_id, player_id, season, window))
+        for r in older:
+            if r["game_id"] not in seen and len(rows) < window:
+                rows.append(r); seen.add(r["game_id"])
+    return rows, n_cur
+
+def predict_legacy(player_id, player_name, future_games, season):
+    """The old plain recency-weighted average of the last 8 games, for players the league logs don't cover yet."""
+    games, n_cur = _history(player_id, season, LEGACY_WINDOW)
+    if len(games) < MIN_GAMES: return []
+    games = list(reversed(games))          # oldest -> newest, so recent games weigh more
+    pred = {s: weighted_avg([g[s] for g in games]) for s in STATS}
+    conf = _confidence([g["pts"] for g in games], pred["pts"], n_cur, len(games))
+    return [(player_id, player_name, fg["date"], fg["opponent"], round(pred["pts"], 1), round(pred["reb"], 1),
+             round(pred["ast"], 1), conf, LEGACY_PLAYER_VERSION, datetime.utcnow().isoformat())
+            for fg in future_games]
+
+def run_player_predictions(season, games):
     future = upcoming_games(season)
     if not future:
         clear_predictions(season)
         logger.info(f"No upcoming games for {season}; forecasts cleared.")
         return
+    logs = _player_logs() if games else {}
+    ratings, params = None, None
+    if logs:
+        _, ratings, env = walk(team_params(season), games, want_env=True)
+        params, metrics = tune_player_model(season, logs, env)
+        set_param("player_params", json.dumps(params))
+        set_param("player_metrics", json.dumps(metrics))
     players = query("SELECT player_id, player_name FROM roster WHERE season=?", (season,))
     all_rows = []
     for p in players:
-        rows = predict_for_player(p["player_id"], p["player_name"], future, season=season)
+        hist = logs.get(p["player_id"], [])[-WINDOW:] if logs else []
+        if len(hist) < MIN_GAMES:
+            rows = predict_legacy(p["player_id"], p["player_name"], future, season)
+        else:
+            n_cur = sum(1 for h in hist if h["season"] == season)
+            conf = _confidence([h["pts"] for h in hist], _base_stat(hist, "pts", params["decay_min"],
+                                                                    params["decay"]["pts"]), n_cur, len(hist))
+            base = {s: _base_stat(hist, s, params["decay_min"], params["decay"][s]) for s in STATS}
+            rows = []
+            for fg in future:
+                e = ratings.env(fg["opp"])
+                f = {s: max(0.0, base[s] * _env_factor(s, e, params)) for s in STATS}
+                rows.append((p["player_id"], p["player_name"], fg["date"], fg["opponent"], round(f["pts"], 1),
+                             round(f["reb"], 1), round(f["ast"], 1), conf, PLAYER_MODEL_VERSION,
+                             datetime.utcnow().isoformat()))
         if rows:
             logger.info(f"Generated {len(rows)} predictions for {p['player_name']}")
         all_rows.extend(rows)
@@ -257,6 +549,20 @@ def run_all_predictions(season=None):
         clear_predictions(season)
         save_predictions(all_rows, season)
     logger.info("Predictions saved.")
+
+def run_all_predictions(season=None):
+    season = season or current_season()
+    logger.info(f"Running predictions for {season}...")
+    games = []
+    try:
+        games = _games()
+        run_team_model(season, games)
+    except Exception as e:
+        logger.exception(f"Team prediction error: {e}")
+    try:
+        run_player_predictions(season, games)
+    except Exception as e:
+        logger.exception(f"Player prediction error: {e}")
 
 def get_player_averages(player_id, n_games=10, season=None):
     sql = ("SELECT pts, reb, ast, fg_pct, fg3_pct, ft_pct, stl, blk, tov, min "

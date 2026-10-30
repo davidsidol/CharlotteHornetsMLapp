@@ -207,8 +207,9 @@ def api_game_record():
 def api_model_form():
     """Hot/cold form of the team-game predictions plus the model's most confident bet for the next game."""
     from statistics import NormalDist
-    from ml_predictions import MARGIN_SD
+    from ml_predictions import margin_sd
     season = _season_arg()
+    MARGIN_SD = margin_sd(season)
     rows = query("SELECT * FROM game_predictions WHERE season=? AND result IS NOT NULL "
                  "ORDER BY game_date ASC, game_id ASC", (season,))
     seq = [bool(r["correct"]) for r in rows]
