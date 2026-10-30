@@ -681,7 +681,9 @@ function renderOverview(){
 function renderRecord(r){
   const head='<div class="gp-rec"><div class="seclbl">Prediction record</div>';
   if(!r||!r.total){
-    return head+'<div class="empty" style="padding:10px">No finished games graded yet — the record starts after the next game.</div></div>';
+    return head+`<div class="empty" style="padding:10px">${season!==currentSeason
+      ? 'No model record for this season — it is the earliest season stored, so the model has no earlier games to predict from.'
+      : 'No finished games graded yet — the record starts after the next game.'}</div></div>`;
   }
   const box=(v,l,c)=>`<div class="sb"><div class="sv" style="color:${c}">${v}</div><div class="sl">${l}</div></div>`;
   const wc=r.win_calls||{correct:0,total:0}, lc=r.loss_calls||{correct:0,total:0};

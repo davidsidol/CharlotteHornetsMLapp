@@ -301,4 +301,23 @@ def refresh_all(season=None):
     fetch_league_player_games(season)
     for older in (prev_season(season), prev_season(prev_season(season))):
         fetch_league_player_games(older, refresh=False)
+    if season == current_season():
+        backfill_past_seasons()
     logger.info(f"Data refresh complete for {season}.")
+
+def backfill_past_seasons():
+    """One-time pull of the Hornets roster, games, player stats and schedule for every earlier season the model
+    has league results for, so each one gets a working season tab. Seasons already stored are left as they are."""
+    rows = query("SELECT DISTINCT season FROM league_games WHERE team_abbr=?", (HORNETS_ABBR,))
+    for s in sorted((r["season"] for r in rows), reverse=True):
+        if s >= current_season() or query("SELECT 1 AS x FROM team_games WHERE season=? LIMIT 1", (s,)):
+            continue
+        logger.info(f"Backfilling Hornets data for past season {s}...")
+        fetch_roster(s)
+        time.sleep(0.6)
+        fetch_team_games(s)
+        time.sleep(0.6)
+        fetch_player_stats(s)
+        time.sleep(0.6)
+        fetch_schedule(s)
+        time.sleep(0.6)

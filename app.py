@@ -17,7 +17,7 @@ from datetime import datetime, date
 from flask import Flask, jsonify, render_template, Response, request, stream_with_context
 
 from database import init_db, query, current_season, season_label
-from fetcher import refresh_all, PINNED_PLAYERS
+from fetcher import refresh_all, PINNED_PLAYERS, HORNETS_ABBR
 from ml_predictions import run_all_predictions, get_player_averages
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -82,8 +82,12 @@ def _season_arg():
     return s if re.fullmatch(r"\d{4}-\d{2}", s) else current_season()
 
 def _available_seasons():
+    # league_games holds every season the model learns from, so a season gets a tab even before its
+    # Hornets stats are backfilled (fetcher.backfill_past_seasons fills them in on the next refresh).
     rows = query("SELECT DISTINCT season FROM team_games WHERE season IS NOT NULL "
-                 "UNION SELECT DISTINCT season FROM schedule WHERE season IS NOT NULL")
+                 "UNION SELECT DISTINCT season FROM schedule WHERE season IS NOT NULL "
+                 "UNION SELECT DISTINCT season FROM league_games WHERE season IS NOT NULL AND team_abbr=?",
+                 (HORNETS_ABBR,))
     return sorted({r["season"] for r in rows} | {current_season()}, reverse=True)
 
 # A game that has not tipped off yet: later day, or today with a later (or unknown) tip time.

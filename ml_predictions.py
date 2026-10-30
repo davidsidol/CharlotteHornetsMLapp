@@ -406,11 +406,21 @@ def run_team_model(season, games):
             set_param(f"team_metrics_{s}", json.dumps(metrics))
     # Back-tests made by an older model version are redone with the current one.
     execute("DELETE FROM game_predictions WHERE source='backtest' AND model_version<>?", (TEAM_MODEL_VERSION,))
-    # Last season: one-time back-test of every game with last season's learned parameters.
-    if not query("SELECT 1 AS x FROM game_predictions WHERE season=? LIMIT 1", (prior,)):
-        p = team_params(prior)
+    # Past seasons: one-time back-test of every game with that season's learned parameters. The earliest stored
+    # season is skipped: with no season before it the model has nothing to start from.
+    stored = sorted({g["season"] for g in games}, key=_season_start)
+    for s in stored[1:]:
+        if _season_start(s) >= _season_start(season):
+            continue
+        if query("SELECT 1 AS x FROM game_predictions WHERE season=? LIMIT 1", (s,)):
+            continue
+        if not get_param(f"team_params_{s}"):
+            params, metrics = tune_team_model(s, games)
+            set_param(f"team_params_{s}", json.dumps(params))
+            set_param(f"team_metrics_{s}", json.dumps(metrics))
+        p = team_params(s)
         preds, _, _ = walk(p, games)
-        backtest_team_predictions(prior, games, preds, p)
+        backtest_team_predictions(s, games, preds, p)
     p = team_params(season)
     preds, ratings, _ = walk(p, games)
     run_team_predictions(season, ratings, p)
