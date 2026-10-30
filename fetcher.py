@@ -296,6 +296,7 @@ def refresh_all(season=None):
     fetch_league_games(season)
     fetch_league_games(prev_season(season), refresh=False)
     fetch_league_games(prev_season(prev_season(season)), refresh=False)   # prior for back-testing last season
+    fetch_league_games(prev_season(prev_season(prev_season(season))), refresh=False)   # a second season to learn from
     time.sleep(0.6)
     fetch_league_player_games(season)
     for older in (prev_season(season), prev_season(prev_season(season))):

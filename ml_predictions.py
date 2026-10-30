@@ -218,27 +218,20 @@ def _season_rows(preds, games, season):
     return [(preds[g["game_id"]][2], g["hs"] - g["as_"]) for g in games
             if g["season"] == season and g["game_id"] in preds and g["hs"] != g["as_"]]
 
-def tune_team_model(target_season, games):
-    """Learn the team-model parameters for `target_season` from every season before it (the first stored season is
-    only warm-up). Returns (params, metrics); the old fixed setting is returned when there is too little history."""
-    seasons = sorted({g["season"] for g in games})
-    tune_seasons = [s for s in seasons[1:] if _season_start(s) < _season_start(target_season)]
+def _fit_team(games, tune_seasons, stop_before):
+    """Grid-search the team parameters on `tune_seasons`, each game predicted only from games before it and the
+    replay stopped before `stop_before`. Returns (params, rows, log-loss, log-loss without rest terms)."""
     eval_games = [g for g in games if g["season"] in tune_seasons and g["hs"] != g["as_"]]
-    if len(eval_games) < 300:
-        return dict(DEFAULT_TEAM_PARAMS), {}
     def score(p):
-        preds, _, _ = walk(p, games, stop_before_season=target_season)
+        preds, _, _ = walk(p, games, stop_before_season=stop_before)
         return [(preds[g["game_id"]][2], g["hs"] - g["as_"]) for g in eval_games if g["game_id"] in preds]
     def best_sd(rows):
         return min((_logloss(rows, sd), sd) for sd in (10.5, 11.25, 12.0, 12.75, 13.5, 15.0, 16.5))
-    base = dict(DEFAULT_TEAM_PARAMS)
-    base_rows = score(base)
-    base_ll = _logloss(base_rows, base["sd"])
-    # Stage 1: the rating itself.
     best = None
+    # Stage 1: the rating itself.
     for w_prior, decay, shrink, hfa in product([0.2, 0.4, 0.6], [0.94, 0.96, 0.98, 1.0],
                                                [0.5, 0.65, 0.8, 0.95], [1.0, 1.4, 1.8]):
-        p = dict(base, w_prior=w_prior, decay=decay, shrink=shrink, hfa=hfa)
+        p = dict(DEFAULT_TEAM_PARAMS, w_prior=w_prior, decay=decay, shrink=shrink, hfa=hfa)
         rows = score(p)
         ll, sd = best_sd(rows)
         if best is None or ll < best[0]:
@@ -251,11 +244,55 @@ def tune_team_model(target_season, games):
         ll, sd = best_sd(rows)
         if ll < best[0]:
             best = (ll, dict(p, sd=sd), rows)
-    ll, params, rows = best
+    return best[1], best[2], best[0], stage1[0]
+
+def _holdout_check(games, tune_seasons):
+    """Does the tuning procedure beat the old fixed settings on a season it did not learn from? Fits on all the
+    tune seasons but the newest, then compares on the newest. None when there is too little history to check."""
+    if len(tune_seasons) < 2:
+        return None
+    fit_seasons, hold = tune_seasons[:-1], tune_seasons[-1]
+    if sum(1 for g in games if g["season"] in fit_seasons) < 300:
+        return None
+    params, _, _, _ = _fit_team(games, fit_seasons, hold)
+    new_preds, _, _ = walk(params, games, stop_before_season=_next_season(hold))
+    old_preds, _, _ = walk(DEFAULT_TEAM_PARAMS, games, stop_before_season=_next_season(hold))
+    new_rows, old_rows = _season_rows(new_preds, games, hold), _season_rows(old_preds, games, hold)
+    if not new_rows:
+        return None
+    return {"season": hold, "games": len(new_rows),
+            "log_loss": round(_logloss(new_rows, params["sd"]), 4), "accuracy": round(100 * _accuracy(new_rows), 1),
+            "baseline_log_loss": round(_logloss(old_rows, DEFAULT_TEAM_PARAMS["sd"]), 4),
+            "baseline_accuracy": round(100 * _accuracy(old_rows), 1)}
+
+def _next_season(season):
+    y = _season_start(season) + 1
+    return f"{y}-{str(y + 1)[-2:]}"
+
+def tune_team_model(target_season, games):
+    """Learn the team-model parameters for `target_season` from every season before it (the first stored season is
+    only warm-up). Returns (params, metrics). The old fixed settings are returned when there is too little history,
+    or when the tuning procedure fails to beat them on a held-out season (it must also win on log-loss)."""
+    seasons = sorted({g["season"] for g in games})
+    tune_seasons = [s for s in seasons[1:] if _season_start(s) < _season_start(target_season)]
+    if sum(1 for g in games if g["season"] in tune_seasons) < 300:
+        return dict(DEFAULT_TEAM_PARAMS), {}
+    base = dict(DEFAULT_TEAM_PARAMS)
+    params, rows, ll, no_rest_ll = _fit_team(games, tune_seasons, target_season)
+    base_preds, _, _ = walk(base, games, stop_before_season=target_season)
+    base_rows = [(base_preds[g["game_id"]][2], g["hs"] - g["as_"]) for g in games
+                 if g["season"] in tune_seasons and g["hs"] != g["as_"] and g["game_id"] in base_preds]
     metrics = {"seasons": tune_seasons, "games": len(rows),
                "accuracy": round(100 * _accuracy(rows), 1), "log_loss": round(ll, 4),
-               "baseline_accuracy": round(100 * _accuracy(base_rows), 1), "baseline_log_loss": round(base_ll, 4),
-               "no_rest_log_loss": round(stage1[0], 4)}
+               "baseline_accuracy": round(100 * _accuracy(base_rows), 1),
+               "baseline_log_loss": round(_logloss(base_rows, base["sd"]), 4),
+               "no_rest_log_loss": round(no_rest_ll, 4)}
+    hold = _holdout_check(games, tune_seasons)
+    if hold:
+        metrics["holdout"] = hold
+        if hold["log_loss"] >= hold["baseline_log_loss"]:
+            metrics["used"] = "old fixed settings (tuning did not beat them on the held-out season)"
+            params = base
     # Honest check: both settings on the target season's games played so far (not used for learning).
     new_preds, _, _ = walk(params, games)
     old_preds, _, _ = walk(base, games)
