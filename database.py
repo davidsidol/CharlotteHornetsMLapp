@@ -96,32 +96,41 @@ TABLES = [
     ("prior_checked", "player_id INTEGER, season TEXT, checked_at TEXT", ("player_id", "season"), False),
     ("roster", """season TEXT, player_id INTEGER, player_name TEXT, number TEXT, position TEXT,
         updated_at TEXT""", ("season", "player_id"), False),
+    # Every NBA player's game log (all teams): history for the player model to learn from.
+    ("league_player_games", """season TEXT, game_id TEXT, player_id INTEGER, player_name TEXT, team_abbr TEXT,
+        opp_abbr TEXT, game_date_iso TEXT, home INTEGER, min REAL, pts INTEGER, reb INTEGER, ast INTEGER""",
+     ("season", "game_id", "player_id"), False),
+    # Learned model settings and their back-test metrics (JSON).
+    ("model_params", "name TEXT, value TEXT, updated_at TEXT", ("name",), False),
 ]
 INDEXES = [
     ("idx_ps_season_player", "player_stats", "season, player_id, game_date_iso"),
     ("idx_tg_season", "team_games", "season, game_date_iso"),
     ("idx_sched_season", "schedule", "season, game_date"),
     ("idx_pred_season", "predictions", "season, player_id"),
+    ("idx_lpg_player", "league_player_games", "player_id, game_date_iso"),
 ]
 KEYS = {t: key for t, _, key, _ in TABLES}
 HAS_ID = {t for t, _, _, has_id in TABLES if has_id}
 _SHORT_TEXT = {"season", "game_id", "game_date", "game_date_iso", "game_time", "fetched_at", "created_at",
-               "updated_at", "checked_at", "team_abbr", "home_team", "away_team", "wl", "result", "status"}
+               "updated_at", "checked_at", "team_abbr", "opp_abbr", "home_team", "away_team", "wl", "result",
+               "status"}
+_LONG_TEXT = {("model_params", "value")}      # JSON blobs
 
 def table_columns(table):
     cols = next(c for t, c, _, _ in TABLES if t == table)
     return [c.strip().split(None, 1) for c in cols.split(",")]
 
-def _mssql_type(col, typ, key):
+def _mssql_type(table, col, typ, key):
     if typ == "TEXT":
-        typ = "NVARCHAR(40)" if col in _SHORT_TEXT else "NVARCHAR(64)" if col in key else "NVARCHAR(400)"
+        typ = "NVARCHAR(MAX)" if (table, col) in _LONG_TEXT else "NVARCHAR(40)" if col in _SHORT_TEXT else "NVARCHAR(64)" if col in key else "NVARCHAR(400)"
     else:
         typ = {"INTEGER": "INT", "REAL": "FLOAT"}[typ]
     return f"{typ} NOT NULL" if col in key else typ
 
 def _create_sql(table, cols, key, has_id):
     if MSSQL:
-        body = ", ".join(f"{c} {_mssql_type(c, t, key)}" for c, t in table_columns(table))
+        body = ", ".join(f"{c} {_mssql_type(table, c, t, key)}" for c, t in table_columns(table))
         if has_id:
             body = f"id INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_{table} PRIMARY KEY, {body}"
             if key:
@@ -363,3 +372,17 @@ def save_roster(season: str, rows: list):
         cur.executemany(_insert_sql("roster", ROSTER_COLS), [(season,) + tuple(r) + (now,) for r in rows])
     conn.commit()
     conn.close()
+
+def save_league_player_games(season: str, rows: list):
+    """rows: (game_id, player_id, player_name, team_abbr, opp_abbr, game_date_iso, home, min, pts, reb, ast)."""
+    execute_many(_insert_sql("league_player_games", ["season", "game_id", "player_id", "player_name", "team_abbr",
+                                                     "opp_abbr", "game_date_iso", "home", "min", "pts", "reb",
+                                                     "ast"]), [(season,) + tuple(r) for r in rows])
+
+def set_param(name, value):
+    execute(_insert_sql("model_params", ["name", "value", "updated_at"]),
+            (name, str(value), datetime.utcnow().isoformat()))
+
+def get_param(name, default=None):
+    r = query("SELECT value FROM model_params WHERE name=?", (name,))
+    return r[0]["value"] if r else default

@@ -7,11 +7,12 @@ are never touched by the scheduled refresh, so their stored stats stay frozen.
 """
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from database import (
     upsert_player_stats, upsert_team_games, save_team_info,
-    upsert_schedule, save_roster, save_prior_games, save_league_games, current_season, iso_date, query
+    upsert_schedule, save_roster, save_prior_games, save_league_games, save_league_player_games,
+    current_season, iso_date, query
 )
 
 logger = logging.getLogger(__name__)
@@ -243,6 +244,39 @@ def fetch_league_games(season, refresh=True):
     except Exception as e:
         logger.error(f"Error fetching league games for {season}: {e}")
 
+def fetch_league_player_games(season, refresh=True):
+    """Every player's game log for the season (all teams) - one call. Feeds the player model with minutes and
+    per-minute rates for the whole league. refresh=False skips the call when the season is already stored.
+    Only games from two days before the newest stored one onward are written, so a refresh stays small."""
+    from nba_api.stats.endpoints import leaguegamelog
+    have = query("SELECT MAX(game_date_iso) AS d FROM league_player_games WHERE season=?", (season,))[0]["d"]
+    if have and not refresh:
+        return
+    try:
+        data = leaguegamelog.LeagueGameLog(
+            season=season, season_type_all_star="Regular Season",
+            player_or_team_abbreviation="P", headers=HEADERS, timeout=90
+        ).get_normalized_dict()
+        floor = None
+        if have:
+            floor = (datetime.strptime(have, "%Y-%m-%d") - timedelta(days=2)).strftime("%Y-%m-%d")
+        rows = []
+        for g in data.get("LeagueGameLog", []):
+            mins = _safe_float(g.get("MIN"))
+            day = iso_date(g["GAME_DATE"])
+            if not g.get("WL") or mins <= 0 or not day or (floor and day < floor):
+                continue
+            matchup = str(g.get("MATCHUP", ""))
+            rows.append((str(g["GAME_ID"]), int(g["PLAYER_ID"]), str(g["PLAYER_NAME"]),
+                         str(g["TEAM_ABBREVIATION"]), matchup.split()[-1], day,
+                         0 if "@" in matchup else 1, round(mins, 2),
+                         _safe_int(g["PTS"]), _safe_int(g["REB"]), _safe_int(g["AST"])))
+        if rows:
+            save_league_player_games(season, rows)
+        logger.info(f"Saved {len(rows)} league player-game rows for {season}")
+    except Exception as e:
+        logger.error(f"Error fetching league player games for {season}: {e}")
+
 def refresh_all(season=None):
     season = season or current_season()
     logger.info(f"Starting full data refresh for {season}...")
@@ -262,4 +296,9 @@ def refresh_all(season=None):
     fetch_league_games(season)
     fetch_league_games(prev_season(season), refresh=False)
     fetch_league_games(prev_season(prev_season(season)), refresh=False)   # prior for back-testing last season
+    fetch_league_games(prev_season(prev_season(prev_season(season))), refresh=False)   # a second season to learn from
+    time.sleep(0.6)
+    fetch_league_player_games(season)
+    for older in (prev_season(season), prev_season(prev_season(season))):
+        fetch_league_player_games(older, refresh=False)
     logger.info(f"Data refresh complete for {season}.")
