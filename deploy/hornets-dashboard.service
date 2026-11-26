@@ -1,0 +1,24 @@
+[Unit]
+Description=Charlotte Hornets dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hornets-dashboard
+Group=hornets-dashboard
+StateDirectory=hornets-dashboard
+WorkingDirectory=/var/lib/hornets-dashboard
+Environment=DB_PATH=/var/lib/hornets-dashboard/hornets.db
+Environment=PORT=8080
+EnvironmentFile=-/etc/default/hornets-dashboard
+ExecStart=/usr/local/bin/hornets-dashboard
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

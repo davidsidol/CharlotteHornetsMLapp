@@ -12,3 +12,8 @@ err.txt
 venv/
 logs/
 data/
+/target/
+*.db-wal
+*.db-shm
+.DS_Store
+._*

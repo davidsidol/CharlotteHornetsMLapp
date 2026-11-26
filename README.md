@@ -4,6 +4,12 @@ A real-time NBA analytics dashboard for the Charlotte Hornets, featuring live st
 
 ![Python](https://img.shields.io/badge/Python-3.9%2B-blue) ![Flask](https://img.shields.io/badge/Flask-3.x-green) ![License](https://img.shields.io/badge/license-MIT-blue)
 
+## Rust on Ubuntu
+
+The `codex/rust-ubuntu` branch includes a native Rust service for Ubuntu 24.04. It serves the same browser dashboard and API, pulls NBA data, fits the team and player models, and stores history in SQLite. The service bundles the dashboard assets and SQLite. It uses the system `curl` and CA certificates for HTTPS. The Python instructions below apply to the Windows implementation.
+
+**[Build, migrate data, and install the Ubuntu service](deploy/ubuntu.md)** · **[Ubuntu builds and downloadable binaries](https://github.com/davidsidol/CharlotteHornetsMLapp/actions/workflows/rust-ubuntu.yml)**
+
 ## Features
 
 - **Live Team Stats** — Win/loss record, conference rank, recent game results

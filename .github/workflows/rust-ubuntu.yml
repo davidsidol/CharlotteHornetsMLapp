@@ -1,0 +1,24 @@
+name: Rust Ubuntu build
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: x86_64
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo fmt --check && cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo build --release --locked
+      - run: python3 tests/migration_smoke.py target/release/hornets-dashboard
+      - run: tar -czf hornets-ubuntu-24.04-${{ matrix.arch }}.tar.gz -C target/release hornets-dashboard -C "$GITHUB_WORKSPACE/deploy" hornets-dashboard.service
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hornets-ubuntu-24.04-${{ matrix.arch }}
+          path: '*.tar.gz'
