@@ -1,5 +1,6 @@
 mod api;
 mod db;
+mod espn;
 mod feed;
 mod model;
 use anyhow::{Context, Result};
@@ -49,6 +50,7 @@ impl App {
             let path = app.path.clone();
             let result =
                 tokio::task::spawn_blocking(move || feed::refresh(&db::connect(&path)?)).await;
+            let success = matches!(result, Ok(Ok(())));
             let msg = match result {
                 Ok(Ok(())) => "Data updated!".into(),
                 Ok(Err(e)) => format!("Refresh error: {e:#}"),
@@ -57,7 +59,7 @@ impl App {
             eprintln!("{msg}");
             app.busy.store(false, Ordering::Release);
             app.send("status", json!({"message":msg,"refreshing":false}));
-            app.send("refresh", json!({"ts":db::stamp()}));
+            app.send("refresh", json!({"ts":db::stamp(),"success":success}));
         });
         true
     }

@@ -4,7 +4,7 @@ use rusqlite::{params, Connection};
 use serde_json::{json, Map, Value};
 use std::process::Command;
 
-fn download(url: &str, args: &[(&str, &str)], timeout: &str) -> Result<Value> {
+pub(crate) fn download(url: &str, args: &[(&str, &str)], timeout: &str) -> Result<Value> {
     let mut cmd = Command::new("curl");
     cmd.args([
         "--disable",
@@ -88,7 +88,7 @@ fn league(season: &str, kind: &str) -> Result<Vec<Value>> {
         "LeagueGameLog",
     )
 }
-fn store(c: &Connection, table: &str, cols: &str, rows: &[Value]) -> Result<()> {
+pub(crate) fn store(c: &Connection, table: &str, cols: &str, rows: &[Value]) -> Result<()> {
     let fields = cols.split_whitespace().collect::<Vec<_>>();
     let sql = format!(
         "INSERT OR REPLACE INTO {table} ({}) SELECT {} FROM json_each(?)",
@@ -254,6 +254,19 @@ fn info(c: &Connection, season: &str) -> Result<()> {
     Ok(())
 }
 pub fn refresh(c: &Connection) -> Result<()> {
+    let source = std::env::var("HORNETS_DATA_SOURCE").unwrap_or_else(|_| "nba".into());
+    match source.as_str() {
+        "espn" => return crate::espn::refresh(c),
+        "nba" => ensure!(
+            !c.query_row(
+                "SELECT EXISTS(SELECT 1 FROM league_games WHERE game_id LIKE 'espn-%')",
+                [],
+                |r| r.get::<_, bool>(0)
+            )?,
+            "ESPN history requires HORNETS_DATA_SOURCE=espn"
+        ),
+        _ => anyhow::bail!("unknown HORNETS_DATA_SOURCE: {source}"),
+    }
     let y = year();
     let current = season_id(y);
     let mut errors = vec![];

@@ -489,7 +489,8 @@ function connectSSE(){
     const d=JSON.parse(e.data);
     const ts=new Date(d.ts+'Z');
     $('last-update').textContent='Updated '+ts.toLocaleTimeString();
-    toast('✓ Data refreshed — reloading dashboard', 3000);
+    if(d.success!==false) toast('✓ Data refreshed — reloading dashboard', 3000);
+    await loadSeasons();
     await fetchAll();
     renderAll();
   });
