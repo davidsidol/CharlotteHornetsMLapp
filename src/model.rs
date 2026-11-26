@@ -152,7 +152,7 @@ fn score(games: &[Game], n: usize, p: Settings, first: &str) -> (f64, f64) {
         .min_by(|a, b| a.0.total_cmp(&b.0))
         .unwrap()
 }
-fn fit(games: &[Game], n: usize, first: &str) -> Settings {
+fn fit(games: &[Game], n: usize, first: &str) -> (Settings, f64) {
     let mut best = (f64::INFINITY, BASE);
     let check = |p: Settings, best: &mut (f64, Settings)| {
         let (l, sd) = score(games, n, p, first);
@@ -178,41 +178,69 @@ fn fit(games: &[Game], n: usize, first: &str) -> Settings {
             }
         }
     }
+    let no_rest_loss = best.0;
     let stage = best.1;
     for rest in [0., 0.1, 0.2, 0.3] {
         for b2b in [0., 0.75, 1.5, 2.25] {
             check(Settings { rest, b2b, ..stage }, &mut best)
         }
     }
-    best.1
+    (best.1, no_rest_loss)
 }
-fn tune(games: &[Game], n: usize) -> Settings {
+fn metrics(games: &[Game], n: usize, p: Settings, first: &str) -> Value {
+    let (mut count, mut hits, mut loss) = (0, 0, 0.);
+    walk(games, n, p, |g, _, (h, a)| {
+        if g.season.as_str() >= first && g.hp != g.ap {
+            count += 1;
+            hits += i32::from((h > a) == (g.hp > g.ap));
+            let prob = cdf((h - a) / p.sd).clamp(0.0001, 0.9999);
+            loss -= if g.hp > g.ap { prob } else { 1. - prob }.ln();
+        }
+    });
+    let denom = count.max(1) as f64;
+    json!({"games":count,"accuracy":round(100.*hits as f64/denom,1),"log_loss":round(loss/denom,4)})
+}
+fn comparison(games: &[Game], n: usize, p: Settings, first: &str) -> Value {
+    let mut result = metrics(games, n, p, first);
+    let baseline = metrics(games, n, BASE, first);
+    result["baseline_accuracy"] = baseline["accuracy"].clone();
+    result["baseline_log_loss"] = baseline["log_loss"].clone();
+    result
+}
+fn tune(active: &[Game], n: usize, target: &str) -> (Settings, Value) {
+    let games = &active[..active.partition_point(|g| g.season.as_str() < target)];
     let seasons: BTreeSet<_> = games.iter().map(|g| g.season.as_str()).collect();
     let Some(&first) = seasons.iter().nth(1) else {
-        return BASE;
+        return (BASE, json!({}));
     };
     if games.iter().filter(|g| g.season.as_str() >= first).count() < 300 {
-        return BASE;
+        return (BASE, json!({}));
     }
+    let (mut params, no_rest) = fit(games, n, first);
+    let mut report = comparison(games, n, params, first);
+    report["seasons"] = json!(seasons.iter().skip(1).collect::<Vec<_>>());
+    report["no_rest_log_loss"] = json!(round(no_rest, 4));
     let hold = seasons.last().unwrap();
     let train = &games[..games.partition_point(|g| g.season.as_str() < *hold)];
     if train.iter().filter(|g| g.season.as_str() >= first).count() >= 300 {
-        let trial = fit(train, n, first);
-        let loss = |p: Settings| {
-            let mut l = 0.;
-            walk(games, n, p, |g, _, (h, a)| {
-                if &g.season == hold && g.hp != g.ap {
-                    let q = cdf((h - a) / p.sd).clamp(0.0001, 0.9999);
-                    l -= if g.hp > g.ap { q } else { 1. - q }.ln();
-                }
-            });
-            l
-        };
-        if loss(trial) >= loss(BASE) {
-            return BASE;
+        let (trial, _) = fit(train, n, first);
+        let mut check = comparison(games, n, trial, hold);
+        check["season"] = json!(hold);
+        if num(&check, "games") > 0. {
+            if num(&check, "log_loss") >= num(&check, "baseline_log_loss") {
+                params = BASE;
+                report["used"] =
+                    json!("old fixed settings (tuning did not beat them on the held-out season)");
+            }
+            report["holdout"] = check;
         }
     }
-    fit(games, n, first)
+    let mut check = comparison(active, n, params, target);
+    if num(&check, "games") >= 20. {
+        check["season"] = json!(target);
+        report["out_of_sample"] = check;
+    }
+    (params, report)
 }
 fn pick((hp, ap): (f64, f64), home: bool, sd: f64) -> (i64, i64, f64) {
     let (u, v) = if home { (hp, ap) } else { (ap, hp) };
@@ -262,11 +290,10 @@ pub fn run(c: &Connection, current: &str) -> Result<()> {
         .collect();
     let upcoming = future(c, current, "schedule", "status='Scheduled'", 5)?;
     for target in targets {
-        let past = &games[..games.partition_point(|g| g.season.as_str() < target)];
-        let p = tune(past, teams.len());
         let mut back = vec![];
         let mut env = HashMap::new();
         let active = &games[..games.partition_point(|g| g.season.as_str() <= target)];
+        let (p, metrics) = tune(active, teams.len(), target);
         let mut r = walk(active, teams.len(), p, |g, r, score| {
             if target == current {
                 for team in [g.h, g.a] {
@@ -284,6 +311,7 @@ pub fn run(c: &Connection, current: &str) -> Result<()> {
             &format!("team_params_{target}"),
             json!({"sd":p.sd,"decay":p.decay,"shrink":p.shrink,"hfa":p.home,"k_rest":p.rest,"k_b2b":p.b2b,"w_prior":p.prior}),
         )?;
+        save_param(c, &format!("team_metrics_{target}"), metrics)?;
         for (g, score) in back {
             let home = names[&g.h] == "CHA";
             let opp = names[&if home { g.a } else { g.h }];
@@ -360,18 +388,23 @@ fn factor(i: usize, env: [f64; 2], p: PlayerParams) -> f64 {
     (1. + p.pace[i] * (env[1] - 1.) + if i == 0 { p.def * (env[0] - 1.) } else { 0. })
         .clamp(0.8, 1.25)
 }
-fn player_fit(logs: &BTreeMap<i64, Vec<Log>>, season: &str) -> PlayerParams {
+fn player_fit(logs: &BTreeMap<i64, Vec<Log>>, season: &str) -> (PlayerParams, Value) {
+    let mut holdout = vec![];
     let mut cases = vec![];
     for list in logs.values() {
         for i in 3..list.len() {
             let h = &list[i.saturating_sub(10)..i];
-            if list[i].season.as_str() < season && weighted(h, 1., |r| r.minutes) >= 12. {
-                cases.push((h, &list[i]));
+            if weighted(h, 1., |r| r.minutes) >= 12. {
+                if list[i].season.as_str() < season {
+                    cases.push((h, &list[i]));
+                } else if list[i].season == season {
+                    holdout.push((h, &list[i]));
+                }
             }
         }
     }
     if cases.len() < 500 {
-        return PLAYER;
+        return (PLAYER, json!({}));
     }
     let sub: Vec<_> = cases.iter().step_by((cases.len() / 6000).max(1)).collect();
     let mut best = (f64::INFINITY, PLAYER);
@@ -428,7 +461,36 @@ fn player_fit(logs: &BTreeMap<i64, Vec<Log>>, season: &str) -> PlayerParams {
             }
         }
     }
-    p
+    let summary = |cases: &[&(&[Log], &Log)]| {
+        let error = |stat, legacy: bool| {
+            let total: f64 = cases
+                .iter()
+                .map(|(h, g)| {
+                    let pred = if legacy {
+                        weighted(&h[h.len().saturating_sub(8)..], 0.85, |l| l.stats[stat])
+                    } else {
+                        base(h, stat, p) * factor(stat, g.env, p)
+                    };
+                    (pred - g.stats[stat]).abs()
+                })
+                .sum();
+            round(total / cases.len() as f64, 2)
+        };
+        let scores =
+            |legacy| json!({"pts":error(0,legacy),"reb":error(1,legacy),"ast":error(2,legacy)});
+        json!({"cases":cases.len(),"mae":scores(false),"baseline_mae":scores(true)})
+    };
+    let mut report = summary(&sub);
+    if holdout.len() >= 100 {
+        let sample = holdout
+            .iter()
+            .step_by((holdout.len() / 4000).max(1))
+            .collect::<Vec<_>>();
+        let mut evaluation = summary(&sample);
+        evaluation["season"] = json!(season);
+        report["out_of_sample"] = evaluation;
+    }
+    (p, report)
 }
 fn players(
     c: &Connection,
@@ -446,7 +508,8 @@ fn players(
     for g in rows(c,"SELECT player_id,season,opp_abbr,game_date_iso,min,pts,reb,ast FROM league_player_games WHERE min>0 AND season<=? ORDER BY game_date_iso,game_id,player_id",[season])?{
  let day=ordinal(s(&g,"game_date_iso"))?;let environment=teams.get(s(&g,"opp_abbr")).and_then(|idx|env.get(&(day,*idx))).copied().unwrap_or([1.;2]);
  logs.entry(g["player_id"].as_i64().context("invalid player id")?).or_default().push(Log{minutes:num(&g,"min"),season:s(&g,"season").into(),stats:["pts","reb","ast"].map(|k|num(&g,k)),env:environment});}
-    let p = player_fit(&logs, season);
+    let (p, metrics) = player_fit(&logs, season);
+    save_param(c, "player_metrics", metrics)?;
     let named = |v: [f64; 3]| json!({"pts":v[0],"reb":v[1],"ast":v[2]});
     save_param(
         c,

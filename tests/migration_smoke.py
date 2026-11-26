@@ -1,6 +1,7 @@
 """Offline end-to-end check using NBA-shaped fixtures and the original Python models."""
 import json
 import os
+import random
 from pathlib import Path
 import socket
 import sqlite3
@@ -27,13 +28,21 @@ def upstream():
     prefix = f"002{year % 100:02d}"
     if endpoint == "leaguegamelog":
         rows = []
-        for day in range(1, 7):
-            for team, opp, pts, margin in [("CHA", "BOS", 110+day, 5), ("BOS", "CHA", 105+day, -5)]:
+        today=date.today()
+        current=today.year-(today.month<10)
+        count=305 if year==current-2 else (105 if year==current-1 else 6)
+        rng=random.Random(year)
+        for day in range(1,count+1):
+            home_score=rng.randrange(90,131)
+            away_score=home_score+rng.choice([-1,1])*rng.randrange(1,15)
+            day_iso=(date(year,10,1)+timedelta(days=day-1)).isoformat()
+            opponent="BOS" if day%2==0 else "NYK"
+            for team, opp, pts, margin in [("CHA",opponent,home_score,home_score-away_score),(opponent,"CHA",away_score,away_score-home_score)]:
                 player = args["PlayerOrTeam"] == "P"
-                rows.append(dict(GAME_ID=prefix+f"{day:05d}", GAME_DATE=f"{year}-10-{day:02d}",
+                rows.append(dict(GAME_ID=prefix+f"{day:05d}", GAME_DATE=day_iso,
                                  TEAM_ABBREVIATION=team, MATCHUP=f"{team} {'vs.' if team=='CHA' else '@'} {opp}",
-                                 WL="W" if margin > 0 else "L", PTS=day+10 if player else pts,
-                                 PLUS_MINUS=margin, REB=5, AST=3, MIN=32, FG_PCT=0.465,
+                                 WL="W" if margin > 0 else "L", PTS=rng.randrange(12,35) if player else pts,
+                                 PLUS_MINUS=margin, REB=rng.randrange(3,10), AST=rng.randrange(1,6), MIN=rng.randrange(20,40), FG_PCT=0.465,
                                  PLAYER_ID=1641706 if team=="CHA" else 100, PLAYER_NAME=team+" player"))
         name = "LeagueGameLog"
     elif endpoint == "scheduleleaguev2":
@@ -79,6 +88,11 @@ def run(binary, folder):
             got = actual.execute(query).fetchall()
             want = expected.execute(query).fetchall()
             assert got and got == want, (table, got, want)
+        for key in ["team_params_"+season, "team_metrics_"+season, "player_params", "player_metrics"]:
+            q="SELECT value FROM model_params WHERE name=?"
+            got=json.loads(actual.execute(q,(key,)).fetchone()[0])
+            want=json.loads(expected.execute(q,(key,)).fetchone()[0])
+            assert got and got==want,(key,got,want)
         # An actual live call must keep its winner and prediction when later graded.
         gid = actual.execute("SELECT game_id FROM game_predictions WHERE source='live'").fetchone()[0]
         actual.execute("UPDATE game_predictions SET winner='BOS',pred_pts=91 WHERE game_id=?", (gid,))
@@ -109,7 +123,7 @@ def run(binary, folder):
         assert get("/api/seasons")["current"]==season
         assert len(get("/api/team")["recent_games"])==6
         assert get("/api/players")["CHA player"]["averages"]["games"]==6
-        assert get("/api/player/1641706")["averages"]["mpg"]==32
+        assert get("/api/player/1641706")["averages"]["mpg"]>=20
         for route in ["predictions","game_predictions","game_record","model_form","live"]:
             get("/api/"+route)
         for route in ["/", "/static/HornetsLogo_bg.png"]:
@@ -135,7 +149,7 @@ def run(binary, folder):
     subprocess.run(cmd,env=env,check=True)
     assert subprocess.run(cmd,env=env,capture_output=True).returncode != 0
     with sqlite3.connect(export) as c:
-        assert c.execute("SELECT count(*) FROM player_stats").fetchone()[0]==24
+        assert c.execute("SELECT count(*) FROM player_stats").fetchone()[0]==422
     print("Refresh, Python model comparisons, grading, HTTP/SSE and SQLite export passed.")
 
 
