@@ -262,7 +262,8 @@ table.gt tr:hover td{background:rgba(0,120,140,.06)}
   .tabs,.seasons{padding-left:14px;padding-right:14px}
   .hdr-center{display:none}
   .g2,.g4{grid-template-columns:1fr}
-  .bqs{gap:14px}
+  .banner{flex-wrap:wrap}
+  .bqs{gap:14px;flex-wrap:wrap}
   .seasons-lbl{display:none}
 }
 
@@ -353,6 +354,7 @@ table.gt tr:hover td{background:rgba(0,120,140,.06)}
       <div class="bq"><div class="bqv" id="ov-l">–</div><div class="bql">Losses</div></div>
       <div class="bq"><div class="bqv" id="ov-p">–</div><div class="bql">Win%</div></div>
       <div class="bq"><div class="bqv" id="ov-r">–</div><div class="bql">East</div></div>
+      <div class="bq"><div class="bqv" id="ov-div">–</div><div class="bql">Southeast</div></div>
     </div>
   </div>
 
@@ -622,6 +624,7 @@ function renderOverview(){
   setText('ov-w',wins??'–'); setText('ov-l',losses??'–');
   setText('ov-p',wp!=null?(wp*100).toFixed(0)+'%':'–');
   setText('ov-r',info.conf_rank?'#'+info.conf_rank:'–');
+  setText('ov-div',info.div_rank?'#'+info.div_rank:'–');
   setText('hdr-rec',wins!=null?`${wins} – ${losses}`:'– –');
   setText('ov-rec-badge',rg.length?`${w}W–${l}L ${season===currentSeason?'so far':'final'}`:'No games yet');
 

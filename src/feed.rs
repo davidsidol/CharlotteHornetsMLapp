@@ -5,6 +5,11 @@ use serde_json::{json, Map, Value};
 use std::process::Command;
 
 pub(crate) fn download(url: &str, args: &[(&str, &str)], timeout: &str) -> Result<Value> {
+    Ok(serde_json::from_slice(&download_bytes(
+        url, args, timeout,
+    )?)?)
+}
+pub(crate) fn download_bytes(url: &str, args: &[(&str, &str)], timeout: &str) -> Result<Vec<u8>> {
     let mut cmd = Command::new("curl");
     cmd.args([
         "--disable",
@@ -19,13 +24,17 @@ pub(crate) fn download(url: &str, args: &[(&str, &str)], timeout: &str) -> Resul
         timeout,
         "-A",
         "Mozilla/5.0",
-        "-H",
-        "Accept: application/json, text/plain, */*",
-        "-H",
-        "Origin: https://www.nba.com",
-        "-e",
-        "https://www.nba.com/",
     ]);
+    if url.starts_with("https://stats.nba.com/") {
+        cmd.args([
+            "-H",
+            "Accept: application/json, text/plain, */*",
+            "-H",
+            "Origin: https://www.nba.com",
+            "-e",
+            "https://www.nba.com/",
+        ]);
+    }
     for (k, v) in args {
         cmd.args(["--data-urlencode", &format!("{k}={v}")]);
     }
@@ -36,7 +45,7 @@ pub(crate) fn download(url: &str, args: &[(&str, &str)], timeout: &str) -> Resul
         url,
         String::from_utf8_lossy(&r.stderr).trim()
     );
-    Ok(serde_json::from_slice(&r.stdout)?)
+    Ok(r.stdout)
 }
 fn nba(endpoint: &str, args: &[(&str, &str)]) -> Result<Value> {
     download(

@@ -317,24 +317,41 @@ fn write_schedule(c: &Connection, season: &str, games: &[Game]) -> Result<()> {
 fn team_info(c: &Connection, season: &str, end: i32) -> Result<()> {
     let payload = download(
         "https://site.api.espn.com/apis/v2/sports/basketball/nba/standings",
-        &[("season", &end.to_string())],
+        &[("season", &end.to_string()), ("level", "3")],
         "22",
     )?;
-    for conf in list(&payload, "children")? {
-        for team in list(&conf["standings"], "entries")? {
-            if team["team"]["abbreviation"] != "CHA" {
+    for conference in list(&payload, "children")? {
+        for division in list(conference, "children")? {
+            let entries = list(&division["standings"], "entries")?;
+            let Some(cha) = entries.iter().find(|t| t["team"]["abbreviation"] == "CHA") else {
                 continue;
-            }
-            let stats = list(team, "stats")?;
-            let value = |k| {
-                stats
-                    .iter()
-                    .find(|v| v["name"] == k)
-                    .and_then(|v| v["value"].as_f64())
             };
+            // The feed's array order is not the standings order. Conference seeds
+            // order teams with tied records, including the NBA tiebreakers.
+            let stat = |team: &Value, key: &str| -> Result<f64> {
+                list(team, "stats")?
+                    .iter()
+                    .find(|s| s["name"] == key)
+                    .and_then(|s| s["value"].as_f64())
+                    .with_context(|| format!("missing standings {key}"))
+            };
+            let seed = stat(cha, "playoffSeed")?;
+            let pct = stat(cha, "winPercent")?;
+            let mut rank = 1;
+            ensure!(
+                entries.len() == 5,
+                "incomplete Southeast Division standings"
+            );
+            for other in entries {
+                let other_pct = stat(other, "winPercent")?;
+                if other_pct > pct || (other_pct == pct && stat(other, "playoffSeed")? < seed) {
+                    rank += 1;
+                }
+            }
             let tx = c.unchecked_transaction()?;
             c.execute("DELETE FROM team_info WHERE season=?", [season])?;
-            c.execute("INSERT INTO team_info(season,wins,losses,win_pct,conf_rank,updated_at) VALUES(?,?,?,?,?,?)",params![season,value("wins"),value("losses"),value("winPercent"),value("playoffSeed"),stamp()])?;
+            c.execute("INSERT INTO team_info(season,wins,losses,win_pct,conf_rank,div_rank,updated_at) VALUES(?,?,?,?,?,?,?)",
+                params![season,stat(cha,"wins")?,stat(cha,"losses")?,pct,seed,rank,stamp()])?;
             tx.commit()?;
             return Ok(());
         }
@@ -401,6 +418,7 @@ pub fn refresh(c: &Connection) -> Result<()> {
     let y = year();
     let mut league_boxes = vec![];
     let mut failures = 0;
+    let mut metadata_errors = Vec::new();
     for offset in 0..4 {
         let season = season_id(y - offset);
         let key = format!("espn_complete_{season}");
@@ -455,7 +473,25 @@ pub fn refresh(c: &Connection) -> Result<()> {
             games.len()
         );
     }
+    for offset in 1..4 {
+        let end = y - offset + 1;
+        let season = season_id(end - 1);
+        if let Err(e) = crate::roster_history::fill(c, &season, end) {
+            metadata_errors.push(format!("{season} roster: {e:#}"));
+        }
+        let ranked: bool = c.query_row(
+            "SELECT EXISTS(SELECT 1 FROM team_info WHERE season=? AND div_rank BETWEEN 1 AND 5)",
+            [&season],
+            |r| r.get(0),
+        )?;
+        if !ranked {
+            if let Err(e) = team_info(c, &season, end) {
+                metadata_errors.push(format!("{season} standings: {e:#}"));
+            }
+        }
+    }
     crate::model::run(c, &season_id(y))?;
+    ensure!(metadata_errors.is_empty(), "{}", metadata_errors.join(", "));
     ensure!(failures == 0, "{failures} ESPN box scores need retry");
     Ok(())
 }

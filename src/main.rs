@@ -3,6 +3,7 @@ mod db;
 mod espn;
 mod feed;
 mod model;
+mod roster_history;
 use anyhow::{Context, Result};
 use axum::{
     extract::{Path, Query, State},
